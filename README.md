@@ -22,7 +22,7 @@ one Django and React application.
 ## Installation
 
 ```bash
-git clone git@github.com:Wetende/airads.git
+git clone git@github.com:Airads-College/airads.git
 cd airads
 
 python -m venv .venv

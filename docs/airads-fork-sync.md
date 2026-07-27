@@ -1,8 +1,8 @@
 # Airads Fork Sync Guide
 
-This repository (`Wetende/airads`) is a forked product line.
+This repository (`Airads-College/airads`) is a forked product line.
 
-- `origin` points to `Wetende/airads` (where we push AIRADS work)
+- `origin` points to `Airads-College/airads` (where we push Airads work)
 - `upstream` points to the canonical local LMS repository (where we pull shared LMS updates)
 
 ## One-Time Remote Check
@@ -14,7 +14,7 @@ git remote -v
 Expected:
 
 ```text
-origin   git@github.com:Wetende/airads.git
+origin   git@github.com:Airads-College/airads.git
 upstream /home/wetende/Projects/lms
 ```
 
