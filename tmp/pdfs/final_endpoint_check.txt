@@ -1,0 +1,198 @@
+Required ERP API Endpoints
+   49 ENDPOINTS
+
+
+
+Authentication and system
+ METHOD      ENDPOINT                            PURPOSE
+
+   POST      /oauth2/token                       Issue a short-lived machine access token.
+
+                                                 Return API version, supported resources,
+    GET      /api/v1/capabilities
+                                                 scopes, events and limits.
+
+    GET      /api/v1/health                      Return API availability status.
+
+    GET      /.well-known/openid-configuration   Return OpenID Connect discovery metadata.
+
+    GET      /oauth2/authorize                   Initiate student or staff single sign-on.
+
+    GET      /oauth2/userinfo                    Return authenticated ERP identity claims.
+
+   POST      /oauth2/logout                      End an ERP-backed single sign-on session.
+
+
+
+Organization and academic structure
+ METHOD      ENDPOINT                            PURPOSE
+
+                                                 List campuses, schools, faculties and
+    GET      /api/v1/organizations
+                                                 departments.
+
+                                                 List academic years, semesters, terms and
+    GET      /api/v1/academic-periods
+                                                 intakes.
+
+    GET      /api/v1/programs                    List official programmes and qualifications.
+
+    GET      /api/v1/courses                     List official courses, subjects or units.
+
+    GET      /api/v1/program-curricula           List programme-to-unit curriculum mappings.
+
+                                                 List units delivered for a period, class, campus
+    GET      /api/v1/offerings
+                                                 and study mode.
+
+    GET      /api/v1/cohorts                     List official cohorts or classes.
+
+
+
+
+REQUIRED ERP API ENDPOINTS                                                                   PAGE 1
+Students, staff and admissions
+ METHOD      ENDPOINT                                               PURPOSE
+
+    GET      /api/v1/students                                       List and incrementally synchronize students.
+
+    GET      /api/v1/students/{student_id}                          Retrieve one student by immutable ERP ID.
+
+             /api/v1/students/by-admission-number/{admission_numb
+    GET                                                             Retrieve a student by admission number.
+             er}
+
+    GET      /api/v1/staff                                          List and incrementally synchronize staff.
+
+    GET      /api/v1/staff/{staff_id}                               Retrieve one staff member.
+
+   POST      /api/v1/applicants                                     Create an applicant using an idempotency key.
+
+                                                                    Retrieve applicant and admission-processing
+    GET      /api/v1/applicants/{applicant_id}
+                                                                    status.
+
+                                                                    Retrieve an applicant using the originating
+    GET      /api/v1/applicants/by-external-reference/{reference}
+                                                                    external reference.
+
+
+
+Registration, enrolment and teaching
+ METHOD      ENDPOINT                                               PURPOSE
+
+    GET      /api/v1/program-registrations                          List official student programme registrations.
+
+    GET      /api/v1/enrollments                                    List official student unit or offering enrolments.
+
+                                                                    List instructor-to-offering assignments and
+    GET      /api/v1/teaching-assignments
+                                                                    roles.
+
+
+
+
+REQUIRED ERP API ENDPOINTS                                                                                        PAGE 2
+Finance and clearance
+ METHOD      ENDPOINT                                               PURPOSE
+
+    GET      /api/v1/fee-structures                                 List official fee structures and fee codes.
+
+                                                                    List official student invoices and outstanding
+    GET      /api/v1/invoices
+                                                                    items.
+
+                                                                    Return invoiced, paid, balance, sponsorship
+    GET      /api/v1/students/{student_id}/account-summary
+                                                                    and waiver totals.
+
+    GET      /api/v1/receipts                                       List official ERP receipts.
+
+                                                                    List and incrementally synchronize clearance
+    GET      /api/v1/clearances
+                                                                    decisions.
+
+                                                                    Return the current clearance decision for one
+    GET      /api/v1/students/{student_id}/clearance
+                                                                    student.
+
+
+
+Payments and reversals
+ METHOD      ENDPOINT                                               PURPOSE
+
+                                                                    Post a verified payment using an idempotency
+   POST      /api/v1/payments
+                                                                    key.
+
+                                                                    Retrieve ERP payment status and receipt
+    GET      /api/v1/payments/{erp_payment_id}
+                                                                    details.
+
+             /api/v1/payments/by-external-reference/{source_payme   Retrieve a payment using its originating
+    GET
+             nt_id}                                                 payment reference.
+
+                                                                    Submit an approved payment reversal or
+   POST      /api/v1/payment-reversals
+                                                                    refund.
+
+    GET      /api/v1/payment-reversals/{reversal_id}                Retrieve payment reversal status.
+
+             /api/v1/payment-reversals/by-external-reference/{ref   Retrieve a reversal using its originating
+    GET
+             erence}                                                reference.
+
+
+
+
+REQUIRED ERP API ENDPOINTS                                                                                        PAGE 3
+Official results, attendance and completion
+ METHOD      ENDPOINT                                               PURPOSE
+
+                                                                    List accepted result structures and grading
+    GET      /api/v1/result-definitions
+                                                                    definitions.
+
+   POST      /api/v1/results:bulk                                   Submit approved final results in bulk.
+
+    GET      /api/v1/results                                        List submitted and official results.
+
+                                                                    Retrieve result acceptance, rejection or final
+    GET      /api/v1/results/{result_id}
+                                                                    status.
+
+   POST      /api/v1/attendance-summaries                           Submit approved attendance summaries.
+
+                                                                    Retrieve attendance-summary processing
+    GET      /api/v1/attendance-summaries/{attendance_id}
+                                                                    status.
+
+                                                                    Submit verified programme, course or unit
+   POST      /api/v1/completions
+                                                                    completion.
+
+    GET      /api/v1/completions/{completion_id}                    Retrieve completion processing status.
+
+
+
+Webhook endpoints
+ METHOD      ENDPOINT                                               PURPOSE
+
+                                                                    Register a webhook callback and subscribed
+   POST      /api/v1/webhook-subscriptions
+                                                                    event types.
+
+    GET      /api/v1/webhook-subscriptions                          List configured webhook subscriptions.
+
+  DELETE     /api/v1/webhook-subscriptions/{subscription_id}        Remove a webhook subscription.
+
+             https://<lms-domain>/api/v1/integrations/ultimate-er
+   POST                                                             LMS receiver for signed ERP change events.
+             p/webhooks
+
+
+
+
+REQUIRED ERP API ENDPOINTS                                                                                      PAGE 4
+
