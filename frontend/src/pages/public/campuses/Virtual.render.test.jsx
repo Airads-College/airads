@@ -1,5 +1,5 @@
 import { App as InertiaApp } from "@inertiajs/react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 import ProviderWrapper from "../../../app/ProviderWrapper";
 import ApplicationApply from "../ApplicationApply";
@@ -48,7 +48,7 @@ const virtualPageProps = {
 const virtualApplyProps = {
   campuses: [{ id: 1, name: "Virtual Campus", slug: "virtual", type: "virtual" }],
   programmes: [{ id: 1, name: "ICT", level: "certificate", category: "IT" }],
-  educationLevels: ["KCSE"],
+  educationLevels: ["KCPE", "KCSE"],
   intakes: ["Next Available Intake"],
   applicationContext: {
     studyMode: "virtual",
@@ -75,7 +75,7 @@ const mainApplyProps = {
     { name: "Driving School" },
     { name: "Computer Packages" },
   ],
-  educationLevels: ["KCSE"],
+  educationLevels: ["KCPE", "KCSE"],
   intakes: ["Next Available Intake"],
   applicationContext: {
     studyMode: "on_campus",
@@ -141,5 +141,25 @@ describe("Public virtual campus pages", () => {
 
     expect(consoleError).not.toHaveBeenCalled();
     consoleError.mockRestore();
+  });
+
+  test("shows the matching KCSE grade field after KCSE is selected", () => {
+    renderInertiaPage(ApplicationApply, mainApplyProps, "Public/ApplicationApply");
+
+    fireEvent.mouseDown(screen.getByLabelText("Education level"));
+    fireEvent.click(screen.getByRole("option", { name: "KCSE" }));
+
+    expect(screen.getByRole("combobox", { name: /KCSE mean grade/i })).toBeRequired();
+    expect(screen.queryByLabelText("KCPE total marks")).toBeNull();
+  });
+
+  test("does not ask for marks when KCPE is selected", () => {
+    renderInertiaPage(ApplicationApply, mainApplyProps, "Public/ApplicationApply");
+
+    fireEvent.mouseDown(screen.getByLabelText("Education level"));
+    fireEvent.click(screen.getByRole("option", { name: "KCPE" }));
+
+    expect(screen.queryByLabelText("KCPE total marks")).toBeNull();
+    expect(screen.queryByRole("combobox", { name: /KCSE mean grade/i })).toBeNull();
   });
 });

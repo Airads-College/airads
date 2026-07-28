@@ -50,13 +50,41 @@ const Contact = () => {
   };
 
   const campusContacts = [
-    { name: "ELDORET Campus", phone: "0715-696-979" },
-    { name: "NAKURU Campus", phone: "" },
-    { name: "KERICHO Campus", phone: "0729-976-885" },
-    { name: "KISUMU Campus", phone: "0715-505-262" },
-    { name: "BUNGOMA Campus", phone: "0715-771-316" },
-    { name: "LODWAR Campus", phone: "0723-555-999" },
-    { name: "MARALAL Campus", phone: "0723-555-999" }
+    {
+      name: "Kisumu City Campus",
+      address: "Swan Centre, 2nd Floor",
+      phone: "0715 057 262",
+    },
+    {
+      name: "Eldoret City Campus",
+      address: "Institute Plaza, 3rd Floor",
+      phone: "0715 696 979",
+    },
+    {
+      name: "Nakuru City Campus",
+      address: "Tradeworld Building, 2nd Floor",
+      phone: "0711 488 302",
+    },
+    {
+      name: "Kericho Town Campus",
+      address: "ACK Business Park, 2nd Floor",
+      phone: "0729 976 885",
+    },
+    {
+      name: "Bungoma Town Campus",
+      address: "College Plaza, 3rd Floor, Opp. Main Stage",
+      phone: "0715 771 316",
+    },
+    {
+      name: "Lodwar Town Campus",
+      address: "Equity Bank Building, Opp. National Bank",
+      phone: "0719 818 645",
+    },
+    {
+      name: "Maralal Town Campus",
+      address: "Supa Sacco Building, 2nd Floor, Opp. Huduma Centre",
+      phone: "0717 885 888",
+    },
   ];
 
   return (
@@ -110,15 +138,15 @@ const Contact = () => {
                       <LocationOn />
                     </Box>
                     <Typography variant="body1" sx={{ fontWeight: 500, color: 'text.primary' }}>
-                      Institute Plaza 3rd & 4th Floor
+                      Institute Plaza, 3rd Floor
                     </Typography>
                   </Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', p: 2, bgcolor: 'grey.50', borderRadius: 3, transition: 'background-color 0.3s', '&:hover': { bgcolor: brand.softBlue } }}>
                     <Box sx={{ width: 40, height: 40, borderRadius: '50%', bgcolor: brand.borderBlue, display: 'flex', alignItems: 'center', justifyContent: 'center', mr: 2, color: brand.primary }}>
                       <Phone />
                     </Box>
-                    <Typography component="a" href="tel:+254723555999" variant="body1" sx={{ fontWeight: 500, color: 'text.primary', textDecoration: 'none', '&:hover': { color: brand.primary } }}>
-                      +254 723 555 999
+                    <Typography component="a" href="tel:+254715696979" variant="body1" sx={{ fontWeight: 500, color: 'text.primary', textDecoration: 'none', '&:hover': { color: brand.primary } }}>
+                      0715 696 979
                     </Typography>
                   </Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', p: 2, bgcolor: 'grey.50', borderRadius: 3, transition: 'background-color 0.3s', '&:hover': { bgcolor: brand.softBlue } }}>
@@ -152,28 +180,27 @@ const Contact = () => {
                 </Box>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
                   {campusContacts.map((campus, index) => (
-                    <Box 
-                      key={index} 
-                      sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, bgcolor: brand.softBlue, borderRadius: 3, transition: 'all 0.3s', '&:hover': { bgcolor: brand.borderBlue, transform: 'scale(1.02)' } }}
+                    <Box
+                      key={campus.name}
+                      sx={{ display: 'flex', justifyContent: 'space-between', alignItems: { xs: 'flex-start', sm: 'center' }, flexDirection: { xs: 'column', sm: 'row' }, gap: 1.5, p: 2, bgcolor: brand.softBlue, borderRadius: 3, transition: 'all 0.3s', '&:hover': { bgcolor: brand.borderBlue, transform: 'scale(1.02)' } }}
                     >
-                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'flex-start' }}>
                         <Box sx={{ width: 32, height: 32, borderRadius: '50%', bgcolor: brand.borderBlue, display: 'flex', alignItems: 'center', justifyContent: 'center', mr: 2 }}>
                           <Typography variant="body2" sx={{ fontWeight: 'bold', color: brand.primary }}>{index + 1}</Typography>
                         </Box>
-                        <Typography variant="body1" sx={{ fontWeight: 600, color: 'text.primary' }}>{campus.name}</Typography>
+                        <Box>
+                          <Typography variant="body1" sx={{ fontWeight: 700, color: 'text.primary' }}>{campus.name}</Typography>
+                          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>{campus.address}</Typography>
+                        </Box>
                       </Box>
-                      {campus.phone ? (
-                        <Typography 
-                          component="a" 
-                          href={`tel:${campus.phone}`} 
-                          variant="body2" 
-                          sx={{ fontWeight: 'bold', color: brand.primary, px: 2, py: 0.5, borderRadius: 4, bgcolor: brand.borderBlue, textDecoration: 'none', transition: 'background-color 0.2s', '&:hover': { bgcolor: brand.softBlue, color: brand.primaryHover } }}
-                        >
-                          {campus.phone}
-                        </Typography>
-                      ) : (
-                        <Typography variant="body2" sx={{ color: 'text.secondary', px: 2, py: 0.5 }}>N/A</Typography>
-                      )}
+                      <Typography
+                        component="a"
+                        href={`tel:${campus.phone.replaceAll(" ", "")}`}
+                        variant="body2"
+                        sx={{ fontWeight: 'bold', color: brand.primary, px: 2, py: 0.5, borderRadius: 4, bgcolor: brand.borderBlue, textDecoration: 'none', whiteSpace: 'nowrap', transition: 'background-color 0.2s', '&:hover': { bgcolor: brand.softBlue, color: brand.primaryHover } }}
+                      >
+                        {campus.phone}
+                      </Typography>
                     </Box>
                   ))}
                 </Box>

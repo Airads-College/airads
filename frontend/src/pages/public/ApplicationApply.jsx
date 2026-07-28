@@ -22,6 +22,21 @@ import { usePublicBrand } from "../../hooks/usePublicBrand";
 import AiradsLogoLockup from "../../components/common/AiradsLogoLockup";
 import { getFlashMessages } from "../../utils/userMessages";
 
+const KCSE_GRADES = [
+  "A",
+  "A-",
+  "B+",
+  "B",
+  "B-",
+  "C+",
+  "C",
+  "C-",
+  "D+",
+  "D",
+  "D-",
+  "E",
+];
+
 /* ── Section header inside the form ────────────────────────── */
 function FormSectionHeader({ icon, title, brand }) {
   return (
@@ -76,6 +91,7 @@ export default function ApplicationApply({
     preferredProgramme: "",
     intake: intakes[0] || "",
     educationLevel: "",
+    educationResult: "",
     studyMode: applicationContext?.studyMode || "on_campus",
     message: "",
     source: applicationContext?.source || "main_website",
@@ -295,7 +311,13 @@ export default function ApplicationApply({
                 select
                 label="Education level"
                 value={data.educationLevel}
-                onChange={(event) => setData("educationLevel", event.target.value)}
+                onChange={(event) => {
+                  setData({
+                    ...data,
+                    educationLevel: event.target.value,
+                    educationResult: "",
+                  });
+                }}
                 fullWidth
               >
                 {educationLevels.map((level) => (
@@ -305,6 +327,25 @@ export default function ApplicationApply({
                 ))}
               </TextField>
             </Grid>
+            {data.educationLevel === "KCSE" && (
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <TextField
+                  select
+                  label="KCSE mean grade"
+                  value={data.educationResult}
+                  onChange={(event) => setData("educationResult", event.target.value)}
+                  required
+                  fullWidth
+                  helperText="Select the mean grade shown on the KCSE certificate."
+                >
+                  {KCSE_GRADES.map((grade) => (
+                    <MenuItem key={grade} value={grade}>
+                      {grade}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Grid>
+            )}
           </Grid>
         </Box>
 

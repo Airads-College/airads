@@ -176,6 +176,12 @@ export default function AdmissionsDetail({ application, statusChoices = [] }) {
                     <DetailLine label="Phone" value={application.phone} />
                     <DetailLine label="WhatsApp" value={application.whatsapp} />
                     <DetailLine label="Education Level" value={application.educationLevel} />
+                    {application.educationResult && (
+                      <DetailLine
+                        label="KCSE Mean Grade"
+                        value={application.educationResult}
+                      />
+                    )}
                     <DetailLine label="Intake" value={application.intake} />
                   </Box>
                   {application.message && (

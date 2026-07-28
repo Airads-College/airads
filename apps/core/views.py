@@ -2778,6 +2778,7 @@ def _serialize_admission_application(
                 "whatsapp": application.whatsapp,
                 "intake": application.intake,
                 "educationLevel": application.education_level,
+                "educationResult": application.education_result,
                 "message": application.message,
                 "internalNotes": application.internal_notes,
                 "linkedOrder": (
@@ -10715,6 +10716,17 @@ def airads_application_submit(request):
     preferred_campus = campus.name if campus else _clean_admission_value(data, "preferredCampus")
     phone = _clean_admission_value(data, "phone")
     whatsapp = _clean_admission_value(data, "whatsapp") or phone
+    education_level = _clean_admission_value(data, "educationLevel")
+    education_result = ""
+
+    if education_level == AdmissionApplication.EDUCATION_LEVEL_KCSE:
+        education_result = _clean_admission_value(data, "educationResult").upper()
+        if not education_result:
+            messages.error(request, "Please provide the KCSE mean grade.")
+            return _redirect_after_application(request, study_mode)
+        if education_result not in AdmissionApplication.KCSE_GRADES:
+            messages.error(request, "Please select a valid KCSE mean grade.")
+            return _redirect_after_application(request, study_mode)
 
     AdmissionApplication.objects.create(
         full_name=_clean_admission_value(data, "fullName"),
@@ -10727,7 +10739,8 @@ def airads_application_submit(request):
         preferred_campus=preferred_campus,
         preferred_programme=preferred_programme,
         intake=_clean_admission_value(data, "intake"),
-        education_level=_clean_admission_value(data, "educationLevel"),
+        education_level=education_level,
+        education_result=education_result,
         message=_clean_admission_value(data, "message"),
         source="virtual_subdomain" if is_virtual else "main_website",
     )

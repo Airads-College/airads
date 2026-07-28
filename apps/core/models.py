@@ -141,6 +141,23 @@ class Campus(TimeStampedModel):
 class AdmissionApplication(TimeStampedModel):
     """Public student admissions application submitted from the AIRADS site."""
 
+    EDUCATION_LEVEL_KCSE = "KCSE"
+
+    KCSE_GRADES = (
+        "A",
+        "A-",
+        "B+",
+        "B",
+        "B-",
+        "C+",
+        "C",
+        "C-",
+        "D+",
+        "D",
+        "D-",
+        "E",
+    )
+
     STUDY_MODE_ON_CAMPUS = "on_campus"
     STUDY_MODE_VIRTUAL = "virtual"
 
@@ -209,6 +226,7 @@ class AdmissionApplication(TimeStampedModel):
     preferred_programme = models.CharField(max_length=255)
     intake = models.CharField(max_length=120, blank=True, default="")
     education_level = models.CharField(max_length=120, blank=True, default="")
+    education_result = models.CharField(max_length=20, blank=True, default="")
     message = models.TextField(blank=True, default="")
     source = models.CharField(max_length=80, blank=True, default="website")
     status = models.CharField(

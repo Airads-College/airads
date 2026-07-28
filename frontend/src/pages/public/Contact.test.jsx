@@ -92,4 +92,18 @@ describe("Airads contact inquiry form", () => {
 
     expect(screen.getByRole("button", { name: /Sending/i })).toBeDisabled();
   });
+
+  it("shows the current campus addresses and contact numbers", () => {
+    render(<Contact />);
+
+    expect(screen.getByText("Kisumu City Campus")).toBeInTheDocument();
+    expect(screen.getByText("Swan Centre, 2nd Floor")).toBeInTheDocument();
+    expect(screen.getByText("0715 057 262")).toBeInTheDocument();
+    expect(screen.getByText("Tradeworld Building, 2nd Floor")).toBeInTheDocument();
+    expect(screen.getByText("0711 488 302")).toBeInTheDocument();
+    expect(screen.getByText("Equity Bank Building, Opp. National Bank")).toBeInTheDocument();
+    expect(screen.getByText("0719 818 645")).toBeInTheDocument();
+    expect(screen.getByText("Supa Sacco Building, 2nd Floor, Opp. Huduma Centre")).toBeInTheDocument();
+    expect(screen.getByText("0717 885 888")).toBeInTheDocument();
+  });
 });

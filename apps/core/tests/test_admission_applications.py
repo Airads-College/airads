@@ -86,6 +86,7 @@ def test_public_admission_application_submission_creates_pending_application(cli
         "preferredProgramme": "Information Communication Technology",
         "intake": "January 2026",
         "educationLevel": "KCSE",
+        "educationResult": "B-",
         "message": "I would like to join the diploma intake.",
     }
 
@@ -107,8 +108,52 @@ def test_public_admission_application_submission_creates_pending_application(cli
     assert application.preferred_programme == "Information Communication Technology"
     assert application.intake == "January 2026"
     assert application.education_level == "KCSE"
+    assert application.education_result == "B-"
     assert application.message == "I would like to join the diploma intake."
     assert application.status == AdmissionApplication.STATUS_NEW
+
+
+@pytest.mark.django_db
+def test_public_admission_application_requires_result_for_selected_exam(client):
+    from apps.core.models import AdmissionApplication
+
+    response = client.post(
+        reverse("core:airads.application_submit"),
+        data={
+            "fullName": "Jane Achieng",
+            "phone": "0715000111",
+            "preferredCampus": "Eldoret Campus",
+            "preferredProgramme": "Information Communication Technology",
+            "educationLevel": "KCSE",
+        },
+    )
+
+    assert response.status_code == 302
+    assert not AdmissionApplication.objects.exists()
+    assert "Please provide the KCSE mean grade." in {
+        str(message) for message in get_messages(response.wsgi_request)
+    }
+
+
+@pytest.mark.django_db
+def test_public_admission_application_does_not_capture_kcpe_marks(client):
+    from apps.core.models import AdmissionApplication
+
+    client.post(
+        reverse("core:airads.application_submit"),
+        data={
+            "fullName": "John Kiptoo",
+            "phone": "0715000222",
+            "preferredCampus": "Eldoret Campus",
+            "preferredProgramme": "Information Communication Technology",
+            "educationLevel": "KCPE",
+            "educationResult": "347",
+        },
+    )
+
+    application = AdmissionApplication.objects.get()
+    assert application.education_level == "KCPE"
+    assert application.education_result == ""
 
 
 @pytest.mark.django_db
