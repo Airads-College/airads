@@ -1,1 +1,0 @@
-import{j as o}from"./vendor-motion-D1pTnF5Q.js";import{b as t}from"./vendor-mui-Bd0KahXa.js";const a=t(o.jsx("path",{d:"M4 10h3v7H4zm6.5 0h3v7h-3zM2 19h20v3H2zm15-9h3v7h-3zm-5-9L2 6v2h20V6z"}));export{a as A};
