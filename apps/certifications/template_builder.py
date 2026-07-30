@@ -1,0 +1,619 @@
+"""Application services for the visual certificate template builder."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from copy import deepcopy
+from decimal import Decimal, InvalidOperation
+from uuid import uuid4
+
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import transaction
+from django.utils import timezone
+
+from apps.certifications.models import (
+    CertificateTemplate,
+    CertificateTemplateVersion,
+)
+
+
+ALLOWED_ELEMENT_TYPES = {
+    "text",
+    "dynamic_text",
+    "image",
+    "signature",
+    "line",
+    "shape",
+    "qr_code",
+}
+ALLOWED_ORIENTATIONS = {
+    CertificateTemplateVersion.Orientation.LANDSCAPE,
+    CertificateTemplateVersion.Orientation.PORTRAIT,
+}
+PAGE_SIZES = {
+    CertificateTemplateVersion.Orientation.LANDSCAPE: (Decimal("297"), Decimal("210")),
+    CertificateTemplateVersion.Orientation.PORTRAIT: (Decimal("210"), Decimal("297")),
+}
+MAX_ELEMENTS = 100
+MAX_LAYOUT_BYTES = 250_000
+ALLOWED_FONTS = {
+    "Albert Sans",
+    "Arial",
+    "Georgia",
+    "Times New Roman",
+    "sans-serif",
+    "serif",
+}
+HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def can_manage_templates(user) -> bool:
+    """Allow staff and instructors to create their own visual templates."""
+    return bool(
+        user
+        and user.is_authenticated
+        and (
+            user.is_staff
+            or user.is_superuser
+            or user.groups.filter(name="Instructors").exists()
+        )
+    )
+
+
+def require_template_manager(user) -> None:
+    if not can_manage_templates(user):
+        raise PermissionDenied("You do not have permission to manage certificate templates.")
+
+
+def require_viewable_template(template: CertificateTemplate, user) -> None:
+    require_template_manager(user)
+    if (
+        template.visibility == CertificateTemplate.Visibility.SYSTEM
+        or template.owner_id == user.id
+        or user.is_superuser
+    ):
+        return
+    raise PermissionDenied("You do not have permission to view this certificate template.")
+
+
+def require_editable_template(template: CertificateTemplate, user) -> None:
+    """Protect system starters and enforce template ownership boundaries."""
+    require_template_manager(user)
+    if template.is_starter or template.visibility == CertificateTemplate.Visibility.SYSTEM:
+        raise PermissionDenied("System starter templates must be copied before editing.")
+    if template.owner_id and template.owner_id != user.id and not user.is_superuser:
+        raise PermissionDenied("You do not have permission to edit this certificate template.")
+
+
+def blank_layout(width_mm=Decimal("297"), height_mm=Decimal("210")) -> dict:
+    page_width = float(width_mm)
+    page_height = float(height_mm)
+    content_width = round(page_width * 0.7, 3)
+    content_x = round((page_width - content_width) / 2, 3)
+    return {
+        "schemaVersion": 1,
+        "background": {
+            "color": "#ffffff",
+            "image": None,
+        },
+        "safeAreaMm": 10,
+        "theme": {
+            "accent": "#3157d5",
+            "border": "#3157d5",
+        },
+        "elements": [
+            {
+                "id": f"student-{uuid4().hex[:10]}",
+                "type": "dynamic_text",
+                "x": content_x,
+                "y": round(page_height * 0.34, 3),
+                "width": content_width,
+                "height": round(page_height * 0.12, 3),
+                "rotation": 0,
+                "locked": False,
+                "hidden": False,
+                "zIndex": 1,
+                "content": "{{student_name}}",
+                "styles": {
+                    "fontFamily": "Albert Sans",
+                    "fontSize": 30,
+                    "fontWeight": 700,
+                    "color": "#172033",
+                    "textAlign": "center",
+                    "lineHeight": 1.2,
+                    "letterSpacing": 0,
+                },
+            },
+            {
+                "id": f"course-{uuid4().hex[:10]}",
+                "type": "dynamic_text",
+                "x": content_x,
+                "y": round(page_height * 0.55, 3),
+                "width": content_width,
+                "height": round(page_height * 0.085, 3),
+                "rotation": 0,
+                "locked": False,
+                "hidden": False,
+                "zIndex": 2,
+                "content": "{{program_title}}",
+                "styles": {
+                    "fontFamily": "Albert Sans",
+                    "fontSize": 20,
+                    "fontWeight": 600,
+                    "color": "#3157d5",
+                    "textAlign": "center",
+                    "lineHeight": 1.2,
+                    "letterSpacing": 0,
+                },
+            },
+        ],
+    }
+
+
+def _number(value, field_name: str, *, minimum=None, maximum=None) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, InvalidOperation) as exc:
+        raise ValidationError({field_name: "Must be a number."}) from exc
+    if minimum is not None and parsed < minimum:
+        raise ValidationError({field_name: f"Must be at least {minimum}."})
+    if maximum is not None and parsed > maximum:
+        raise ValidationError({field_name: f"Must be no more than {maximum}."})
+    return round(parsed, 3)
+
+
+def _color(value, fallback, *, transparent=False):
+    candidate = str(value or "").strip()
+    if transparent and candidate == "transparent":
+        return candidate
+    return candidate if HEX_COLOR.fullmatch(candidate) else fallback
+
+
+def _normalize_styles(element_type, raw_styles):
+    styles = raw_styles if isinstance(raw_styles, dict) else {}
+    if element_type == "shape":
+        return {
+            "fill": _color(styles.get("fill"), "#3157d5", transparent=True),
+            "stroke": _color(
+                styles.get("stroke"),
+                "transparent",
+                transparent=True,
+            ),
+            "strokeWidth": _number(
+                styles.get("strokeWidth", 1),
+                "strokeWidth",
+                minimum=0,
+                maximum=20,
+            ),
+            "borderRadius": _number(
+                styles.get("borderRadius", 0),
+                "borderRadius",
+                minimum=0,
+                maximum=100,
+            ),
+            "opacity": _number(
+                styles.get("opacity", 1),
+                "opacity",
+                minimum=0,
+                maximum=1,
+            ),
+        }
+    if element_type == "line":
+        return {
+            "stroke": _color(styles.get("stroke"), "#172033"),
+            "strokeWidth": _number(
+                styles.get("strokeWidth", 1),
+                "strokeWidth",
+                minimum=0.1,
+                maximum=20,
+            ),
+            "opacity": _number(
+                styles.get("opacity", 1),
+                "opacity",
+                minimum=0,
+                maximum=1,
+            ),
+        }
+    if element_type in {"image", "signature"}:
+        object_fit = str(styles.get("objectFit") or "contain")
+        return {
+            "objectFit": object_fit if object_fit in {"contain", "cover"} else "contain",
+            "opacity": _number(
+                styles.get("opacity", 1),
+                "opacity",
+                minimum=0,
+                maximum=1,
+            ),
+            "borderColor": _color(
+                styles.get("borderColor"),
+                "transparent",
+                transparent=True,
+            ),
+            "borderWidth": _number(
+                styles.get("borderWidth", 0),
+                "borderWidth",
+                minimum=0,
+                maximum=20,
+            ),
+            "borderRadius": _number(
+                styles.get("borderRadius", 0),
+                "borderRadius",
+                minimum=0,
+                maximum=100,
+            ),
+        }
+    if element_type == "qr_code":
+        correction = str(styles.get("errorCorrection") or "M").upper()
+        return {
+            "foreground": _color(styles.get("foreground"), "#172033"),
+            "background": _color(styles.get("background"), "#ffffff"),
+            "errorCorrection": (
+                correction if correction in {"L", "M", "Q", "H"} else "M"
+            ),
+            "padding": _number(
+                styles.get("padding", 1.5),
+                "padding",
+                minimum=0,
+                maximum=10,
+            ),
+            "borderColor": _color(
+                styles.get("borderColor"),
+                "transparent",
+                transparent=True,
+            ),
+            "borderWidth": _number(
+                styles.get("borderWidth", 0),
+                "borderWidth",
+                minimum=0,
+                maximum=20,
+            ),
+        }
+    if element_type in {"text", "dynamic_text"}:
+        font = str(styles.get("fontFamily") or "Albert Sans")
+        align = str(styles.get("textAlign") or "center")
+        vertical = str(styles.get("verticalAlign") or "center")
+        font_size = _number(
+            styles.get("fontSize", 16),
+            "fontSize",
+            minimum=6,
+            maximum=160,
+        )
+        minimum_font_size = _number(
+            styles.get("minFontSize", min(12, font_size)),
+            "minFontSize",
+            minimum=6,
+            maximum=160,
+        )
+        maximum_font_size = _number(
+            styles.get("maxFontSize", font_size),
+            "maxFontSize",
+            minimum=6,
+            maximum=160,
+        )
+        minimum_font_size = min(minimum_font_size, maximum_font_size)
+        transform = str(styles.get("textTransform") or "none")
+        font_style = str(styles.get("fontStyle") or "normal")
+        decoration = str(styles.get("textDecoration") or "none")
+        overflow = str(styles.get("textOverflow") or "ellipsis")
+        return {
+            "fontFamily": font if font in ALLOWED_FONTS else "Albert Sans",
+            "fontSize": font_size,
+            "minFontSize": minimum_font_size,
+            "maxFontSize": maximum_font_size,
+            "autoShrink": bool(
+                styles.get("autoShrink", element_type == "dynamic_text")
+            ),
+            "singleLine": bool(styles.get("singleLine", False)),
+            "textOverflow": (
+                overflow if overflow in {"clip", "ellipsis"} else "ellipsis"
+            ),
+            "fontWeight": int(
+                _number(
+                    styles.get("fontWeight", 400),
+                    "fontWeight",
+                    minimum=100,
+                    maximum=900,
+                )
+            ),
+            "color": _color(styles.get("color"), "#172033"),
+            "textAlign": (
+                align if align in {"left", "center", "right", "justify"} else "center"
+            ),
+            "verticalAlign": (
+                vertical if vertical in {"top", "center", "bottom"} else "center"
+            ),
+            "fontStyle": font_style if font_style in {"normal", "italic"} else "normal",
+            "textDecoration": (
+                decoration if decoration in {"none", "underline"} else "none"
+            ),
+            "textTransform": (
+                transform
+                if transform in {"none", "uppercase", "lowercase", "capitalize"}
+                else "none"
+            ),
+            "lineHeight": _number(
+                styles.get("lineHeight", 1.2),
+                "lineHeight",
+                minimum=0.8,
+                maximum=3,
+            ),
+            "letterSpacing": _number(
+                styles.get("letterSpacing", 0),
+                "letterSpacing",
+                minimum=-5,
+                maximum=20,
+            ),
+            "opacity": _number(
+                styles.get("opacity", 1),
+                "opacity",
+                minimum=0,
+                maximum=1,
+            ),
+            "textShadow": bool(styles.get("textShadow", False)),
+            "shadowColor": _color(styles.get("shadowColor"), "#000000"),
+            "shadowOffsetX": _number(
+                styles.get("shadowOffsetX", 1),
+                "shadowOffsetX",
+                minimum=-20,
+                maximum=20,
+            ),
+            "shadowOffsetY": _number(
+                styles.get("shadowOffsetY", 1),
+                "shadowOffsetY",
+                minimum=-20,
+                maximum=20,
+            ),
+            "shadowBlur": _number(
+                styles.get("shadowBlur", 2),
+                "shadowBlur",
+                minimum=0,
+                maximum=30,
+            ),
+        }
+    return {}
+
+
+def validate_layout(layout: dict, *, width_mm, height_mm) -> dict:
+    """Validate and normalize the bounded JSON document used by the builder."""
+    if not isinstance(layout, dict):
+        raise ValidationError({"layout": "Layout must be an object."})
+    try:
+        encoded = json.dumps(layout, separators=(",", ":"), sort_keys=True)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError({"layout": "Layout must contain valid JSON values."}) from exc
+    if len(encoded.encode("utf-8")) > MAX_LAYOUT_BYTES:
+        raise ValidationError({"layout": "Layout is too large."})
+
+    elements = layout.get("elements", [])
+    if not isinstance(elements, list):
+        raise ValidationError({"layout": "Elements must be a list."})
+    if len(elements) > MAX_ELEMENTS:
+        raise ValidationError({"layout": f"A certificate can contain up to {MAX_ELEMENTS} elements."})
+
+    page_width = float(width_mm)
+    page_height = float(height_mm)
+    normalized_elements = []
+    seen_ids = set()
+    for index, raw in enumerate(elements):
+        if not isinstance(raw, dict):
+            raise ValidationError({"layout": f"Element {index + 1} must be an object."})
+        element_id = str(raw.get("id") or "").strip()
+        if not element_id or len(element_id) > 100 or element_id in seen_ids:
+            raise ValidationError({"layout": f"Element {index + 1} has an invalid or duplicate ID."})
+        seen_ids.add(element_id)
+
+        element_type = str(raw.get("type") or "").strip()
+        if element_type not in ALLOWED_ELEMENT_TYPES:
+            raise ValidationError({"layout": f"Element {index + 1} has an unsupported type."})
+
+        width = _number(raw.get("width"), "width", minimum=1, maximum=page_width)
+        height = _number(raw.get("height"), "height", minimum=1, maximum=page_height)
+        x = _number(raw.get("x"), "x", minimum=0, maximum=page_width - width)
+        y = _number(raw.get("y"), "y", minimum=0, maximum=page_height - height)
+        rotation = _number(raw.get("rotation", 0), "rotation", minimum=-360, maximum=360)
+        content = str(raw.get("content") or "")[:2000]
+        styles = _normalize_styles(element_type, raw.get("styles"))
+
+        normalized = deepcopy(raw)
+        normalized.update(
+            {
+                "id": element_id,
+                "name": str(raw.get("name") or "")[:100],
+                "type": element_type,
+                "x": x,
+                "y": y,
+                "width": width,
+                "height": height,
+                "rotation": rotation,
+                "locked": bool(raw.get("locked", False)),
+                "hidden": bool(raw.get("hidden", False)),
+                "zIndex": int(raw.get("zIndex", index + 1)),
+                "content": content,
+                "styles": styles,
+            }
+        )
+        if element_type == "shape":
+            shape = str(raw.get("shape") or "rectangle")
+            normalized["shape"] = (
+                shape if shape in {"rectangle", "circle"} else "rectangle"
+            )
+        normalized_elements.append(normalized)
+
+    background = layout.get("background")
+    if not isinstance(background, dict):
+        background = {"color": "#ffffff", "image": None}
+
+    normalized_layout = deepcopy(layout)
+    normalized_layout.update(
+        {
+            "schemaVersion": 1,
+            "background": {
+                "color": str(background.get("color") or "#ffffff")[:50],
+                "image": background.get("image"),
+                "locked": bool(background.get("locked", False)),
+            },
+            "safeAreaMm": _number(
+                layout.get("safeAreaMm", 10),
+                "safeAreaMm",
+                minimum=0,
+                maximum=min(page_width, page_height) / 3,
+            ),
+            "elements": normalized_elements,
+        }
+    )
+    return normalized_layout
+
+
+def serialize_template(template: CertificateTemplate) -> dict:
+    version = template.current_version
+    metadata = template.metadata or {}
+    return {
+        "id": template.id,
+        "name": template.name,
+        "description": metadata.get("description", ""),
+        "status": template.status,
+        "visibility": template.visibility,
+        "isStarter": template.is_starter,
+        "sourceTemplateId": template.source_template_id,
+        "updatedAt": template.updated_at.isoformat(),
+        "version": version.version_number if version else None,
+        "orientation": version.orientation if version else None,
+        "widthMm": float(version.width_mm) if version else None,
+        "heightMm": float(version.height_mm) if version else None,
+        "layout": version.layout if version else None,
+    }
+
+
+@transaction.atomic
+def create_blank_template(*, name: str, orientation: str, user) -> CertificateTemplate:
+    require_template_manager(user)
+    name = str(name or "").strip()[:255]
+    if not name:
+        raise ValidationError({"name": "Enter a template name."})
+    if orientation not in ALLOWED_ORIENTATIONS:
+        raise ValidationError({"orientation": "Choose portrait or landscape."})
+    width_mm, height_mm = PAGE_SIZES[orientation]
+    template = CertificateTemplate.objects.create(
+        name=name,
+        owner=user,
+        visibility=CertificateTemplate.Visibility.PRIVATE,
+        status=CertificateTemplate.Status.DRAFT,
+        current_version_number=1,
+        metadata={"description": "Custom certificate template"},
+    )
+    CertificateTemplateVersion.objects.create(
+        template=template,
+        version_number=1,
+        orientation=orientation,
+        width_mm=width_mm,
+        height_mm=height_mm,
+        layout=validate_layout(
+            blank_layout(width_mm, height_mm),
+            width_mm=width_mm,
+            height_mm=height_mm,
+        ),
+        created_by=user,
+    )
+    return template
+
+
+@transaction.atomic
+def clone_template(*, source: CertificateTemplate, name: str, user) -> CertificateTemplate:
+    require_template_manager(user)
+    source_version = source.current_version
+    if source_version is None:
+        raise ValidationError({"template": "This template has no visual layout to copy."})
+    clone_name = str(name or f"{source.name} copy").strip()[:255]
+    if not clone_name:
+        raise ValidationError({"name": "Enter a template name."})
+    template = CertificateTemplate.objects.create(
+        name=clone_name,
+        owner=user,
+        visibility=CertificateTemplate.Visibility.PRIVATE,
+        status=CertificateTemplate.Status.DRAFT,
+        source_template=source,
+        current_version_number=1,
+        metadata={
+            "description": (source.metadata or {}).get("description", ""),
+        },
+    )
+    CertificateTemplateVersion.objects.create(
+        template=template,
+        version_number=1,
+        orientation=source_version.orientation,
+        width_mm=source_version.width_mm,
+        height_mm=source_version.height_mm,
+        layout=deepcopy(source_version.layout),
+        created_by=user,
+    )
+    return template
+
+
+@transaction.atomic
+def save_template(*, template: CertificateTemplate, name: str, layout: dict, user):
+    require_editable_template(template, user)
+    version = template.current_version
+    if version is None:
+        raise ValidationError({"template": "This template has no editable layout."})
+
+    normalized_name = str(name or "").strip()[:255]
+    if not normalized_name:
+        raise ValidationError({"name": "Enter a template name."})
+    normalized_layout = validate_layout(
+        layout,
+        width_mm=version.width_mm,
+        height_mm=version.height_mm,
+    )
+
+    if version.is_published:
+        if normalized_name == template.name and normalized_layout == version.layout:
+            return template, version
+        version = CertificateTemplateVersion.objects.create(
+            template=template,
+            version_number=template.versions.order_by("-version_number").first().version_number + 1,
+            orientation=version.orientation,
+            width_mm=version.width_mm,
+            height_mm=version.height_mm,
+            layout=deepcopy(version.layout),
+            created_by=user,
+        )
+        template.current_version_number = version.version_number
+        template.status = CertificateTemplate.Status.DRAFT
+
+    version.layout = normalized_layout
+    version.save(update_fields=["layout", "updated_at"])
+    template.name = normalized_name
+    template.save(
+        update_fields=[
+            "name",
+            "current_version_number",
+            "status",
+            "updated_at",
+        ]
+    )
+    return template, version
+
+
+@transaction.atomic
+def publish_template(*, template: CertificateTemplate, user):
+    require_editable_template(template, user)
+    version = template.current_version
+    if version is None:
+        raise ValidationError({"template": "This template has no layout to publish."})
+    payload = json.dumps(version.layout, separators=(",", ":"), sort_keys=True)
+    version.checksum = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    version.is_published = True
+    version.published_at = timezone.now()
+    version.save(
+        update_fields=[
+            "checksum",
+            "is_published",
+            "published_at",
+            "updated_at",
+        ]
+    )
+    template.status = CertificateTemplate.Status.PUBLISHED
+    template.save(update_fields=["status", "updated_at"])
+    return template, version

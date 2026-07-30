@@ -2,9 +2,11 @@
 Certification services - Template generation, serial numbers, verification.
 Requirements: 1.2, 1.3, 1.4, 2.1, 2.2, 2.3, 2.4, 3.1, 3.2, 3.3, 4.1, 4.2, 4.3, 4.4, 5.1, 5.2, 5.3, 6.1, 6.2, 6.3
 """
+import logging
 import os
 import random
 import string
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
@@ -12,6 +14,7 @@ from typing import Optional
 from django.conf import settings
 from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
 from django.db import transaction
+from django.urls import reverse
 from django.utils import timezone
 
 from apps.assessments.grading_rules import evaluate_result
@@ -20,8 +23,14 @@ from .models import (
     Certificate,
     CertificateEligibility,
     CertificateTemplate,
+    CertificateTemplateVersion,
     VerificationLog,
 )
+from .assignments import resolve_certificate_template
+from .rendering import render_layout_pdf
+
+
+logger = logging.getLogger(__name__)
 
 
 class TemplateValidationError(Exception):
@@ -67,6 +76,10 @@ class TemplateGenerator:
         Falls back to default template if no blueprint-specific template exists.
         Requirements: 1.4
         """
+        resolved = resolve_certificate_template(enrollment.program)
+        if resolved.version:
+            return resolved.template
+
         blueprint = enrollment.program.blueprint
         if blueprint:
             template = CertificateTemplate.objects.filter(blueprint=blueprint).first()
@@ -78,7 +91,13 @@ class TemplateGenerator:
             raise TemplateValidationError("No default template configured")
         return default
 
-    def generate(self, template: CertificateTemplate, data: dict) -> str:
+    def generate(
+        self,
+        template: CertificateTemplate,
+        data: dict,
+        version: CertificateTemplateVersion = None,
+        layout_snapshot: dict = None,
+    ) -> str:
         """
         Generate a PDF certificate from template and data.
         Requirements: 2.2
@@ -90,14 +109,6 @@ class TemplateGenerator:
         Returns:
             Path to the generated PDF file
         """
-        from weasyprint import HTML
-
-        # Replace placeholders with actual values
-        html_content = template.template_html
-        for key, value in data.items():
-            placeholder = f"{{{{{key}}}}}"
-            html_content = html_content.replace(placeholder, str(value))
-
         # Ensure certificates directory exists
         cert_dir = os.path.join(settings.MEDIA_ROOT, 'certificates')
         os.makedirs(cert_dir, exist_ok=True)
@@ -107,7 +118,23 @@ class TemplateGenerator:
         pdf_path = os.path.join('certificates', pdf_filename)
         full_path = os.path.join(settings.MEDIA_ROOT, pdf_path)
 
-        HTML(string=html_content).write_pdf(full_path)
+        visual_layout = layout_snapshot or (version.layout if version else None)
+        if visual_layout and version:
+            render_layout_pdf(
+                layout=visual_layout,
+                width_mm=version.width_mm,
+                height_mm=version.height_mm,
+                data=data,
+                target=full_path,
+            )
+        else:
+            from weasyprint import HTML
+
+            html_content = template.template_html
+            for key, value in data.items():
+                placeholder = f"{{{{{key}}}}}"
+                html_content = html_content.replace(placeholder, str(value))
+            HTML(string=html_content, base_url=settings.MEDIA_ROOT).write_pdf(full_path)
 
         return pdf_path
 
@@ -275,6 +302,76 @@ def serialize_verification_result(result: VerificationResult) -> dict:
     }
 
 
+COURSE_CONTAINER_TYPES = {
+    "category",
+    "chapter",
+    "module",
+    "part",
+    "section",
+    "semester",
+    "term",
+    "topic",
+    "unit",
+    "week",
+    "year",
+}
+
+
+def _published_course_item_counts(program) -> dict[str, int]:
+    from apps.assessments.models import Assignment, Quiz
+
+    nodes = list(
+        program.curriculum_nodes.filter(is_published=True).values(
+            "id",
+            "parent_id",
+            "node_type",
+            "properties",
+        )
+    )
+    parent_ids = {node["parent_id"] for node in nodes if node["parent_id"]}
+    counts = {"lesson": 0, "quiz": 0, "assignment": 0}
+
+    for node in nodes:
+        if node["id"] in parent_ids:
+            continue
+        properties = (
+            node["properties"] if isinstance(node["properties"], dict) else {}
+        )
+        node_type = str(node["node_type"] or "").strip().lower()
+        lesson_type = str(properties.get("lesson_type") or "").strip().lower()
+        content_type = lesson_type or node_type
+        if content_type in {"quiz", "assignment"}:
+            counts[content_type] += 1
+            continue
+        if content_type not in COURSE_CONTAINER_TYPES:
+            counts["lesson"] += 1
+
+    counts["quiz"] = max(
+        counts["quiz"],
+        Quiz.objects.filter(
+            node__program=program,
+            node__is_published=True,
+            is_published=True,
+        ).count(),
+    )
+    counts["assignment"] = max(
+        counts["assignment"],
+        Assignment.objects.filter(program=program, is_published=True).count(),
+    )
+    return counts
+
+
+def build_course_details(program) -> str:
+    """Summarize the published learning items represented by a certificate."""
+    labels = []
+    for item, count in _published_course_item_counts(program).items():
+        if not count:
+            continue
+        plural = "quizzes" if item == "quiz" else f"{item}s"
+        labels.append(f"{count} {item if count == 1 else plural}")
+    return ", ".join(labels)
+
+
 class CertificationEngine:
     """
     Main orchestration service for certificate generation and management.
@@ -302,32 +399,147 @@ class CertificationEngine:
         Returns:
             The created Certificate instance
         """
-        template = self.template_generator.get_template_for_enrollment(enrollment)
+        resolved = resolve_certificate_template(enrollment.program)
+        if not resolved.enabled:
+            raise TemplateValidationError(
+                "Certificate issuance is disabled for this course."
+            )
+        version = resolved.version
+        if version:
+            template = version.template
+        else:
+            template = self.template_generator.get_template_for_enrollment(enrollment)
+            version = (
+                template.versions.filter(is_published=True)
+                .order_by("-version_number")
+                .first()
+            )
         serial = self.serial_generator.generate()
 
         completion_date = timezone.now().date()
         if enrollment.completed_at:
             completion_date = enrollment.completed_at.date()
 
+        instructors = list(enrollment.program.instructors.order_by("id")[:2])
+        primary_instructor = (
+            instructors[0].get_full_name() or instructors[0].email
+            if instructors
+            else "Course instructor"
+        )
+        co_instructor = (
+            instructors[1].get_full_name() or instructors[1].email
+            if len(instructors) > 1
+            else ""
+        )
+        platform_settings = self._platform_settings()
+        public_content = (
+            platform_settings.public_content
+            if isinstance(platform_settings.public_content, dict)
+            else {}
+        )
+        eligibility = CertificateEligibilityService().compute_eligibility(enrollment)
+        score = eligibility.get("overallScore")
+        formatted_score = (
+            f"{float(score):g}%" if score is not None else ""
+        )
+        course_duration = (
+            f"{enrollment.program.duration_hours} hours"
+            if enrollment.program.duration_hours
+            else ""
+        )
+        enrolled_at = enrollment.enrolled_at
+        course_start_date = (
+            timezone.localtime(enrolled_at).date().strftime("%B %d, %Y")
+            if enrolled_at
+            else ""
+        )
         data = {
             'student_name': enrollment.user.get_full_name() or enrollment.user.email,
+            'student_number': f"STU-{enrollment.user_id:06d}",
+            'admission_number': str(
+                getattr(enrollment.user, "admission_number", "") or ""
+            ),
+            'examination_number': str(
+                getattr(enrollment.user, "examination_number", "") or ""
+            ),
             'program_title': enrollment.program.name,
+            'course_details': build_course_details(enrollment.program),
+            'course_level': (
+                enrollment.program.level
+                or enrollment.program.qualification_family
+                or enrollment.program.award_type
+                or ""
+            ),
+            'department': enrollment.program.category or "",
+            'campus': str(
+                public_content.get("campusName")
+                or public_content.get("campus")
+                or ""
+            ),
+            'grade': eligibility.get("gradeStatus") or "",
+            'score': formatted_score,
+            'progress': "100%" if eligibility.get("progressSatisfied") else "",
+            'course_duration': course_duration,
+            'course_start_date': course_start_date,
             'completion_date': completion_date.strftime('%B %d, %Y'),
+            'issue_date': timezone.now().date().strftime('%B %d, %Y'),
             'serial_number': serial,
+            'verification_code': serial,
+            'instructor_name': primary_instructor,
+            'co_instructor_name': co_instructor,
+            'principal_name': str(
+                public_content.get("principalName")
+                or public_content.get("directorName")
+                or ""
+            ),
+            'organization_name': platform_settings.institution_name,
+            'verification_url': self._verification_url(serial),
         }
 
-        pdf_path = self.template_generator.generate(template, data)
+        layout_snapshot = deepcopy(version.layout) if version else {}
+        pdf_path = self.template_generator.generate(
+            template,
+            data,
+            version=version,
+            layout_snapshot=layout_snapshot,
+        )
 
         return Certificate.objects.create(
             enrollment=enrollment,
             template=template,
+            template_version=version,
             serial_number=serial,
             student_name=data['student_name'],
             program_title=data['program_title'],
             completion_date=completion_date,
             issue_date=timezone.now().date(),
             pdf_path=pdf_path,
+            layout_snapshot=layout_snapshot,
+            metadata={"assignmentSource": resolved.source},
         )
+
+    @staticmethod
+    def _instructor_name(enrollment) -> str:
+        instructor = enrollment.program.instructors.order_by("id").first()
+        if not instructor:
+            return "Course instructor"
+        return instructor.get_full_name() or instructor.email
+
+    @staticmethod
+    def _organization_name() -> str:
+        return CertificationEngine._platform_settings().institution_name
+
+    @staticmethod
+    def _platform_settings():
+        from apps.platform.models import PlatformSettings
+
+        return PlatformSettings.get_settings()
+
+    @staticmethod
+    def _verification_url(serial: str) -> str:
+        base_url = str(getattr(settings, "SITE_URL", "") or "").rstrip("/")
+        path = reverse("certifications:verify", kwargs={"serial_number": serial})
+        return f"{base_url}{path}" if base_url else path
 
     def on_program_completed(self, enrollment) -> Optional[CertificateEligibility]:
         """
@@ -340,7 +552,7 @@ class CertificationEngine:
         Returns:
             Eligibility queue record when refreshed, else None
         """
-        return CertificateEligibilityService().refresh_enrollment(enrollment)
+        return CertificateEligibilityService().issue_if_eligible(enrollment)
 
     def get_certificate_for_download(self, certificate: Certificate) -> str:
         """
@@ -393,7 +605,9 @@ class CertificationEngine:
 
 
 class CertificateEligibilityService:
-    """Compute, queue, and release certificate eligibility records."""
+    """Compute eligibility, issue automatically, and retain a recovery queue."""
+
+    AUTOMATIC_RELEASE_NOTE = "Automatically issued after course completion."
 
     def _get_program_result(self, enrollment):
         from apps.assessments.models import AssessmentResult
@@ -416,6 +630,7 @@ class CertificateEligibilityService:
     def compute_eligibility(self, enrollment) -> dict:
         blueprint = enrollment.program.blueprint
         grading_logic = blueprint.grading_logic or {} if blueprint else {}
+        resolved_template = resolve_certificate_template(enrollment.program)
         result = self._get_program_result(enrollment)
 
         evaluation = evaluate_result(
@@ -434,7 +649,11 @@ class CertificateEligibilityService:
             progress_ok = enrollment.status == "completed"
 
         enrollment_complete = enrollment.status == "completed"
-        certificate_enabled = bool(blueprint and blueprint.certificate_enabled)
+        certificate_enabled = bool(
+            blueprint
+            and blueprint.certificate_enabled
+            and resolved_template.enabled
+        )
 
         eligible = (
             certificate_enabled
@@ -446,6 +665,8 @@ class CertificateEligibilityService:
         return {
             "eligible": eligible,
             "certificateEnabled": certificate_enabled,
+            "certificateTemplateSource": resolved_template.source,
+            "certificateTemplateConfigured": bool(resolved_template.version),
             "enrollmentComplete": enrollment_complete,
             "progressSatisfied": progress_ok,
             "gradePassed": grade_passed,
@@ -516,6 +737,81 @@ class CertificateEligibilityService:
                 records.append(record)
         return records
 
+    @staticmethod
+    def _mark_released(
+        eligibility: CertificateEligibility,
+        certificate: Certificate,
+        *,
+        reviewed_by=None,
+        notes: str = "",
+    ) -> CertificateEligibility:
+        eligibility.status = "released"
+        eligibility.certificate = certificate
+        eligibility.reviewed_by = reviewed_by
+        eligibility.released_at = timezone.now()
+        eligibility.release_notes = notes
+        if not eligibility.eligible_at:
+            eligibility.eligible_at = eligibility.released_at
+        eligibility.save()
+        return eligibility
+
+    @transaction.atomic
+    def issue_if_eligible(
+        self,
+        enrollment,
+    ) -> Optional[CertificateEligibility]:
+        """Issue one certificate automatically when the enrollment is eligible.
+
+        A pending queue record is retained when PDF generation cannot complete,
+        allowing the existing administrator release action to retry safely.
+        """
+        eligibility = self.refresh_enrollment(enrollment)
+        if eligibility is None or eligibility.status != "pending":
+            return eligibility
+
+        eligibility = (
+            CertificateEligibility.objects.select_for_update()
+            .select_related(
+                "enrollment",
+                "enrollment__program",
+                "enrollment__program__blueprint",
+                "enrollment__user",
+                "certificate",
+            )
+            .get(pk=eligibility.pk)
+        )
+        if eligibility.status != "pending":
+            return eligibility
+
+        existing_certificate = Certificate.objects.filter(
+            enrollment=eligibility.enrollment
+        ).first()
+        try:
+            with transaction.atomic():
+                certificate = (
+                    existing_certificate
+                    or CertificationEngine().generate_certificate(
+                        eligibility.enrollment
+                    )
+                )
+        except Exception as exc:
+            eligibility.release_notes = (
+                f"Automatic issuance pending: {str(exc) or exc.__class__.__name__}"
+            )[:1000]
+            eligibility.save(update_fields=["release_notes", "updated_at"])
+            logger.exception(
+                "Automatic certificate issuance failed for enrollment_id=%s; "
+                "the recovery queue remains pending",
+                eligibility.enrollment_id,
+            )
+            return eligibility
+
+        return self._mark_released(
+            eligibility,
+            certificate,
+            notes=self.AUTOMATIC_RELEASE_NOTE,
+        )
+
     @transaction.atomic
     def release(self, eligibility: CertificateEligibility, approved_by, notes: str = "") -> Certificate:
         eligibility = CertificateEligibility.objects.select_for_update().select_related(
@@ -540,14 +836,11 @@ class CertificateEligibilityService:
         else:
             certificate = CertificationEngine().generate_certificate(eligibility.enrollment)
 
-        eligibility.status = "released"
-        eligibility.certificate = certificate
-        eligibility.reviewed_by = approved_by
-        eligibility.released_at = timezone.now()
-        if notes:
-            eligibility.release_notes = notes
-        if not eligibility.eligible_at:
-            eligibility.eligible_at = eligibility.released_at
-        eligibility.save()
+        self._mark_released(
+            eligibility,
+            certificate,
+            reviewed_by=approved_by,
+            notes=notes,
+        )
 
         return certificate

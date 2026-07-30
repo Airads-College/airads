@@ -50,6 +50,7 @@ import AutosaveStatus from "./AutosaveStatus";
 import useAutosave from "../hooks/useAutosave";
 import { SETTINGS_SECTIONS } from "../utils/builderTabs";
 import EngagementEditor from "./EngagementEditor";
+import CertificateTemplateSelector from "@/features/certifications/components/CertificateTemplateSelector";
 
 const SETTINGS_SECTION_ICONS = {
     main: MainIcon,
@@ -154,6 +155,11 @@ const SettingsPanel = forwardRef(function SettingsPanel(
             inactivityOffsets: [7, 30],
         },
         gamification_opt_in: Boolean(program.gamificationOptIn),
+        certificate_issue_enabled:
+            program.courseCertificate?.issueEnabled ??
+            Boolean(program.certificateEnabled),
+        certificate_template_version_id:
+            program.courseCertificate?.templateVersionId || "",
     });
 
     const categoryOptions = useMemo(() => {
@@ -334,6 +340,16 @@ const SettingsPanel = forwardRef(function SettingsPanel(
                     section: "reviews",
                     rating_average: currentData.rating_average,
                     rating_count: currentData.rating_count,
+                };
+            }
+            if (settingsSection === "certificate") {
+                return {
+                    tab: "settings",
+                    section: "certificate",
+                    certificate_issue_enabled:
+                        currentData.certificate_issue_enabled,
+                    certificate_template_version_id:
+                        currentData.certificate_template_version_id || "",
                 };
             }
             return { tab: "settings", section: settingsSection };
@@ -1129,13 +1145,44 @@ const SettingsPanel = forwardRef(function SettingsPanel(
         renderSectionPanel(
             "Certificate",
             <Stack spacing={3}>
-                <Alert severity={program.certificateEnabled ? "success" : "info"}>
-                    {program.certificateLabel}
-                </Alert>
-                <Typography variant="body2" color="text.secondary">
-                    Certificate behavior is controlled by the academic blueprint in
-                    Django admin, so course authors cannot override it here.
-                </Typography>
+                {!program.certificateEnabled && (
+                    <Alert severity="warning">
+                        Certificates must also be enabled in this course&apos;s
+                        academic blueprint.
+                    </Alert>
+                )}
+                <FormControlLabel
+                    control={
+                        <Switch
+                            checked={formData.certificate_issue_enabled}
+                            onChange={(event) =>
+                                setData(
+                                    "certificate_issue_enabled",
+                                    event.target.checked,
+                                )
+                            }
+                        />
+                    }
+                    label="Issue a certificate upon completion"
+                />
+                <CertificateTemplateSelector
+                    templates={program.certificateTemplates || []}
+                    value={formData.certificate_template_version_id}
+                    defaultTemplateVersionId={
+                        program.courseCertificate?.inheritedTemplateVersionId
+                    }
+                    defaultTemplateName={
+                        program.courseCertificate?.inheritedTemplateName
+                    }
+                    defaultSource={program.courseCertificate?.inheritedSource}
+                    disabled={!formData.certificate_issue_enabled}
+                    onChange={(templateVersionId) =>
+                        setData(
+                            "certificate_template_version_id",
+                            templateVersionId,
+                        )
+                    }
+                />
             </Stack>,
         );
 
@@ -1294,9 +1341,7 @@ const SettingsPanel = forwardRef(function SettingsPanel(
     );
 
     const hideSaveButton =
-        activeTab === "drip" ||
-        activeTab === "practicum" ||
-        (activeTab === "settings" && settingsSection === "certificate");
+        activeTab === "drip" || activeTab === "practicum";
 
     const renderSettings = () => {
         const sectionRenderers = {
