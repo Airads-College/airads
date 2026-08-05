@@ -33,6 +33,15 @@ def latest_published_version(template: CertificateTemplate):
     )
 
 
+def legacy_default_template():
+    """Prefer an administrator default over a bundled starter fallback."""
+    return (
+        CertificateTemplate.objects.filter(is_default=True)
+        .order_by("is_starter", "-updated_at", "-id")
+        .first()
+    )
+
+
 def published_template_versions():
     """Return one current published version for each visible template."""
     versions = (
@@ -120,7 +129,7 @@ def resolve_inherited_certificate_template(program) -> ResolvedCertificateTempla
         )
 
     # Compatibility for installations that already use the legacy default flag.
-    legacy_template = CertificateTemplate.objects.filter(is_default=True).first()
+    legacy_template = legacy_default_template()
     if legacy_template:
         version = latest_published_version(legacy_template)
         if version:

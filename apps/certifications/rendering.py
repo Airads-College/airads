@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 
 from django.conf import settings
+from django.contrib.staticfiles import finders
 from django.core.exceptions import ValidationError
 
 
@@ -56,11 +57,21 @@ def _css_number(value, default=0):
 
 
 def _local_asset_uri(value):
-    """Allow only files under MEDIA_ROOT; reject remote and traversal URLs."""
+    """Resolve trusted uploaded or bundled static assets; reject remote URLs."""
     if not value:
         return None
     raw = str(value).strip()
     media_url = str(settings.MEDIA_URL or "/media/")
+    static_url = f"/{str(settings.STATIC_URL or '/static/').strip('/')}/"
+    if raw.startswith(static_url):
+        relative = raw[len(static_url) :]
+        static_path = finders.find(relative)
+        if not static_path:
+            raise ValidationError("Certificate static asset is missing.")
+        candidate = Path(static_path).resolve()
+        if not candidate.is_file():
+            raise ValidationError("Certificate static asset is missing.")
+        return candidate.as_uri()
     if raw.startswith(media_url):
         relative = raw[len(media_url) :]
     elif raw.startswith("certificates/assets/"):

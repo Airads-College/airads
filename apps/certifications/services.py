@@ -26,7 +26,7 @@ from .models import (
     CertificateTemplateVersion,
     VerificationLog,
 )
-from .assignments import resolve_certificate_template
+from .assignments import legacy_default_template, resolve_certificate_template
 from .rendering import render_layout_pdf
 
 
@@ -68,7 +68,7 @@ class TemplateGenerator:
         Get the default certificate template.
         Requirements: 1.4
         """
-        return CertificateTemplate.objects.filter(is_default=True).first()
+        return legacy_default_template()
 
     def get_template_for_enrollment(self, enrollment) -> CertificateTemplate:
         """
@@ -77,7 +77,7 @@ class TemplateGenerator:
         Requirements: 1.4
         """
         resolved = resolve_certificate_template(enrollment.program)
-        if resolved.version:
+        if resolved.version and resolved.source != "legacy-default":
             return resolved.template
 
         blueprint = enrollment.program.blueprint
@@ -85,6 +85,9 @@ class TemplateGenerator:
             template = CertificateTemplate.objects.filter(blueprint=blueprint).first()
             if template:
                 return template
+
+        if resolved.version:
+            return resolved.template
 
         default = self.get_default_template()
         if not default:

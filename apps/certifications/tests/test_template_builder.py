@@ -43,7 +43,7 @@ def other_staff():
 def test_seeded_starters_are_protected_visual_templates():
     starters = CertificateTemplate.objects.filter(is_starter=True)
 
-    assert starters.count() == 10
+    assert starters.count() == 11
     assert set(starters.values_list("name", flat=True)) == {
         "Classic Formal",
         "Modern Blue",
@@ -55,6 +55,7 @@ def test_seeded_starters_are_protected_visual_templates():
         "Golden Horizon",
         "Creative Coral",
         "Emerald Grid",
+        "Airads College Official",
     }
     assert all(starter.visibility == "system" for starter in starters)
     assert all(starter.owner_id is None for starter in starters)
