@@ -310,8 +310,6 @@ PROGRAM_INTEREST_SUCCESS_SESSION_KEY = "program_interest_success"
 
 
 def _program_enrollment_mode(program) -> str:
-    from apps.progression.services import get_enrollment_policy_mode
-
     context = _get_platform_pricing_context()
     pricing = get_program_pricing(
         program,
@@ -322,8 +320,6 @@ def _program_enrollment_mode(program) -> str:
     price_display = serialize_price_display(pricing)
     if price_display["allowsOnlineCheckout"] or price_display["allowsOfflinePayment"]:
         return "paid"
-    if get_enrollment_policy_mode() != "open":
-        return "approval"
     return "free"
 
 

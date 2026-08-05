@@ -45,11 +45,9 @@ class EnrollmentNotificationFlowTests(TestCase):
         self.assertEqual(len(mail.outbox), 1)
         self.assertIn(student.email, mail.outbox[0].to)
 
-    def test_program_detail_approval_mode_creates_one_pending_request(self):
-        instructor = UserFactory()
+    def test_free_program_detail_auto_enrolls_when_policy_requires_approval(self):
         student = UserFactory()
         program = self._create_program("REQUEST")
-        InstructorAssignment.objects.create(instructor=instructor, program=program)
         platform_settings = PlatformSettings.get_settings()
         platform_settings.features = {"enrollment_mode": "instructor_approval"}
         platform_settings.save()
@@ -63,15 +61,15 @@ class EnrollmentNotificationFlowTests(TestCase):
             "message": "I would like to join.",
         }
 
-        first_response = self.client.post(submit_url, data=form_data)
-        second_response = self.client.post(submit_url, data=form_data)
+        response = self.client.post(submit_url, data=form_data)
 
-        self.assertEqual(first_response.status_code, 302)
-        self.assertEqual(second_response.status_code, 302)
-        self.assertFalse(Enrollment.objects.filter(user=student, program=program).exists())
-        enrollment_request = EnrollmentRequest.objects.get(user=student, program=program)
-        self.assertEqual(enrollment_request.status, "pending")
-        self.assertEqual(enrollment_request.message, "I would like to join.")
+        self.assertEqual(response.status_code, 302)
+        enrollment = Enrollment.objects.get(user=student, program=program)
+        self.assertEqual(enrollment.status, "active")
+        self.assertEqual(enrollment.access_source, "free")
+        self.assertFalse(
+            EnrollmentRequest.objects.filter(user=student, program=program).exists()
+        )
 
     def test_approved_request_sends_in_app_and_email(self):
         instructor = UserFactory()
