@@ -64,13 +64,21 @@ export function getOrders() {
     return request("get", "/commerce/orders/");
 }
 
-export function createOrder(paymentMethod, programIds = null, applicationId = null) {
+export function createOrder(
+    paymentMethod,
+    programIds = null,
+    applicationId = null,
+    enrollmentIntentId = null,
+) {
     const payload = { paymentMethod };
     if (Array.isArray(programIds) && programIds.length > 0) {
         payload.programIds = programIds;
     }
     if (applicationId) {
         payload.applicationId = applicationId;
+    }
+    if (enrollmentIntentId) {
+        payload.enrollmentIntentId = enrollmentIntentId;
     }
     return request("post", "/commerce/orders/", payload);
 }

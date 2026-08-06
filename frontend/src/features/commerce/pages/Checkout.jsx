@@ -68,6 +68,9 @@ export default function Checkout({ paystack }) {
         isDirectMode && checkout?.applicationId
             ? Number(checkout.applicationId)
             : null;
+    const enrollmentIntentId = checkout?.enrollmentIntentId
+        ? Number(checkout.enrollmentIntentId)
+        : null;
 
     const handlePaid = useCallback((paidOrder) => {
         if (!paidOrder) {
@@ -190,6 +193,7 @@ export default function Checkout({ paystack }) {
             provider,
             isDirectMode ? [directProgramId] : null,
             Number.isFinite(admissionApplicationId) ? admissionApplicationId : null,
+            isDirectMode ? enrollmentIntentId : null,
         );
         if (!orderRes.ok) {
             setError(orderRes.message || "Failed to create order.");
@@ -299,6 +303,7 @@ export default function Checkout({ paystack }) {
         getOrderPageUrl,
         handlePaid,
         isDirectMode,
+        enrollmentIntentId,
         directProgramId,
         paystack,
         refreshCart,

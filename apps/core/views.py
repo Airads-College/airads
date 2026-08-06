@@ -7488,6 +7488,8 @@ def serialize_program_data(program):
     ]
     delivery_profile = get_course_delivery_profile(program)
 
+    from apps.platform.policy import serialize_commerce_policy
+
     return {
         "program": {
             "id": program.id,
@@ -7632,6 +7634,7 @@ def serialize_program_data(program):
         "availableCoInstructors": available_co_instructors,
         "examBodyRegistry": get_registry_for_frontend(),
         "platformFeatures": platform_features,
+        "commercePolicy": serialize_commerce_policy(),
         "deploymentMode": platform_settings.deployment_mode,
         "platformTimezone": settings.TIME_ZONE,
     }
