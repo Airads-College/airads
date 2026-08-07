@@ -558,7 +558,7 @@ export default function Checkout({ paystack }) {
                                                     >
                                                         <FormControlLabel
                                                             value="mpesa"
-                                                            control={<Radio inputProps={{ "aria-label": "M-Pesa" }} />}
+                                                            control={<Radio slotProps={{ input: { "aria-label": "M-Pesa" } }} />}
                                                             label={(
                                                                 <Stack direction="row" spacing={1.5} alignItems="center">
                                                                     <Box
@@ -616,7 +616,7 @@ export default function Checkout({ paystack }) {
                                                     >
                                                         <FormControlLabel
                                                             value="card"
-                                                            control={<Radio inputProps={{ "aria-label": "Credit or debit card" }} />}
+                                                            control={<Radio slotProps={{ input: { "aria-label": "Credit or debit card" } }} />}
                                                             label={(
                                                                 <Stack direction="row" spacing={1.5} alignItems="center">
                                                                     <Box
@@ -657,7 +657,7 @@ export default function Checkout({ paystack }) {
                                                 >
                                                     <FormControlLabel
                                                         value="offline_bank_transfer"
-                                                        control={<Radio inputProps={{ "aria-label": "Bank transfer" }} />}
+                                                        control={<Radio slotProps={{ input: { "aria-label": "Bank transfer" } }} />}
                                                         label={(
                                                             <Stack direction="row" spacing={1.5} alignItems="center">
                                                                 <IconBuildingBank size={22} />
