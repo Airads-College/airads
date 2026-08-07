@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { Head, useForm, usePage } from "@inertiajs/react";
 import {
   Alert,
@@ -36,6 +37,22 @@ const KCSE_GRADES = [
   "D-",
   "E",
 ];
+
+const isProgrammeEligible = (programme, educationLevel, educationResult) => {
+  if (!programme.eligibleEducationLevels?.includes(educationLevel)) {
+    return false;
+  }
+  if (educationLevel === "Primary") {
+    return true;
+  }
+  if (educationLevel !== "Secondary" || !educationResult) {
+    return false;
+  }
+  if (!programme.minimumGrade) {
+    return true;
+  }
+  return KCSE_GRADES.indexOf(educationResult) <= KCSE_GRADES.indexOf(programme.minimumGrade);
+};
 
 /* ── Section header inside the form ────────────────────────── */
 function FormSectionHeader({ icon, title, brand }) {
@@ -87,6 +104,7 @@ export default function ApplicationApply({
     email: "",
     campusId: defaultCampus?.id || "",
     programId: "",
+    preferredCourseCode: "",
     preferredCampus: defaultCampus?.name || "",
     preferredProgramme: "",
     intake: intakes[0] || "",
@@ -96,6 +114,27 @@ export default function ApplicationApply({
     message: "",
     source: applicationContext?.source || "main_website",
   });
+
+  const qualificationReady = isVirtual || (
+    data.educationLevel === "Primary"
+    || (data.educationLevel === "Secondary" && Boolean(data.educationResult))
+  );
+  const eligibleProgrammes = useMemo(() => {
+    if (isVirtual) {
+      return programmes;
+    }
+    if (!qualificationReady) {
+      return [];
+    }
+    return programmes.filter((programme) => (
+      isProgrammeEligible(programme, data.educationLevel, data.educationResult)
+    ));
+  }, [data.educationLevel, data.educationResult, isVirtual, programmes, qualificationReady]);
+  const selectedProgramme = programmes.find((programme) => (
+    isVirtual
+      ? String(programme.id) === String(data.programId)
+      : programme.code === data.preferredCourseCode
+  ));
 
   const handleSubmit = (event) => {
     event.preventDefault();
@@ -270,45 +309,6 @@ export default function ApplicationApply({
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField
                 select
-                label="Preferred course"
-                value={isVirtual ? data.programId : data.preferredProgramme}
-                onChange={(event) => {
-                  if (event.target.value === notSureCourse) {
-                    setData({
-                      ...data,
-                      programId: isVirtual ? notSureCourse : "",
-                      preferredProgramme: notSureCourse,
-                    });
-                    return;
-                  }
-                  const selectedProgramme = programmes.find((programme) => (
-                    String(isVirtual ? programme.id : programme.name) === String(event.target.value)
-                  ));
-                  setData({
-                    ...data,
-                    programId: isVirtual ? event.target.value : "",
-                    preferredProgramme: selectedProgramme?.name || "",
-                  });
-                }}
-                required
-                fullWidth
-              >
-                {programmes.map((programme) => (
-                  <MenuItem
-                    key={programme.id || programme.name}
-                    value={isVirtual ? programme.id : programme.name}
-                  >
-                    {programme.name}
-                  </MenuItem>
-                ))}
-                <MenuItem value={notSureCourse}>
-                  {notSureCourse}
-                </MenuItem>
-              </TextField>
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField
-                select
                 label="Education level"
                 value={data.educationLevel}
                 onChange={(event) => {
@@ -316,8 +316,11 @@ export default function ApplicationApply({
                     ...data,
                     educationLevel: event.target.value,
                     educationResult: "",
+                    preferredCourseCode: isVirtual ? data.preferredCourseCode : "",
+                    preferredProgramme: isVirtual ? data.preferredProgramme : "",
                   });
                 }}
+                required={!isVirtual}
                 fullWidth
               >
                 {educationLevels.map((level) => (
@@ -327,13 +330,20 @@ export default function ApplicationApply({
                 ))}
               </TextField>
             </Grid>
-            {data.educationLevel === "KCSE" && (
+            {(data.educationLevel === "KCSE" || data.educationLevel === "Secondary") && (
               <Grid size={{ xs: 12, sm: 6 }}>
                 <TextField
                   select
                   label="KCSE mean grade"
                   value={data.educationResult}
-                  onChange={(event) => setData("educationResult", event.target.value)}
+                  onChange={(event) => {
+                    setData({
+                      ...data,
+                      educationResult: event.target.value,
+                      preferredCourseCode: isVirtual ? data.preferredCourseCode : "",
+                      preferredProgramme: isVirtual ? data.preferredProgramme : "",
+                    });
+                  }}
                   required
                   fullWidth
                   helperText="Select the mean grade shown on the KCSE certificate."
@@ -346,6 +356,81 @@ export default function ApplicationApply({
                 </TextField>
               </Grid>
             )}
+            <Grid size={{ xs: 12 }}>
+              <TextField
+                select
+                label="Preferred course"
+                value={isVirtual ? data.programId : data.preferredCourseCode}
+                onChange={(event) => {
+                  if (isVirtual && event.target.value === notSureCourse) {
+                    setData({
+                      ...data,
+                      programId: notSureCourse,
+                      preferredCourseCode: "",
+                      preferredProgramme: notSureCourse,
+                    });
+                    return;
+                  }
+                  const chosenProgramme = programmes.find((programme) => (
+                    String(isVirtual ? programme.id : programme.code) === String(event.target.value)
+                  ));
+                  setData({
+                    ...data,
+                    programId: isVirtual ? event.target.value : "",
+                    preferredCourseCode: isVirtual ? "" : event.target.value,
+                    preferredProgramme: chosenProgramme?.name || "",
+                  });
+                }}
+                disabled={!qualificationReady}
+                required
+                fullWidth
+                helperText={
+                  !qualificationReady
+                    ? "Select your education level and grade to see eligible courses."
+                    : selectedProgramme?.additionalRequirement
+                      || `${eligibleProgrammes.length} eligible course${eligibleProgrammes.length === 1 ? "" : "s"} available.`
+                }
+                slotProps={{
+                  select: {
+                    renderValue: (value) => {
+                      const programme = programmes.find((entry) => (
+                        String(isVirtual ? entry.id : entry.code) === String(value)
+                      ));
+                      return programme?.name || (value === notSureCourse ? notSureCourse : "");
+                    },
+                  },
+                }}
+              >
+                {eligibleProgrammes.map((programme) => (
+                  <MenuItem
+                    key={programme.id || programme.code}
+                    value={isVirtual ? programme.id : programme.code}
+                    sx={{ whiteSpace: "normal", py: 1.25 }}
+                  >
+                    {isVirtual ? (
+                      programme.name
+                    ) : (
+                      <Box>
+                        <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                          {programme.name}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: brand.mutedText }}>
+                          {programme.route} · {programme.requirementText}
+                        </Typography>
+                        {programme.additionalRequirement && (
+                          <Typography variant="caption" display="block" color="warning.main">
+                            {programme.additionalRequirement}
+                          </Typography>
+                        )}
+                      </Box>
+                    )}
+                  </MenuItem>
+                ))}
+                {isVirtual && (
+                  <MenuItem value={notSureCourse}>{notSureCourse}</MenuItem>
+                )}
+              </TextField>
+            </Grid>
           </Grid>
         </Box>
 

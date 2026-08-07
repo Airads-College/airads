@@ -10633,7 +10633,10 @@ def airads_application_form(request):
 
 
 def _get_application_form_options(study_mode: str) -> dict:
-    from apps.core.admission_course_options import MAIN_SITE_APPLICATION_COURSE_NAMES
+    from apps.core.admission_course_options import (
+        MAIN_SITE_APPLICATION_COURSES,
+        MAIN_SITE_EDUCATION_LEVELS,
+    )
 
     campuses = Campus.objects.filter(is_active=True)
     if study_mode == AdmissionApplication.STUDY_MODE_VIRTUAL:
@@ -10647,12 +10650,18 @@ def _get_application_form_options(study_mode: str) -> dict:
             }
             for program in Program.objects.filter(is_published=True).order_by("name")
         ]
+        education_levels = [
+            "KCPE",
+            "KCSE",
+            "Artisan Certificate",
+            "Certificate",
+            "Diploma",
+            "Other",
+        ]
     else:
         campuses = campuses.filter(campus_type=Campus.CAMPUS_TYPE_PHYSICAL)
-        programmes = [
-            {"name": course_name}
-            for course_name in MAIN_SITE_APPLICATION_COURSE_NAMES
-        ]
+        programmes = [course.as_payload() for course in MAIN_SITE_APPLICATION_COURSES]
+        education_levels = list(MAIN_SITE_EDUCATION_LEVELS)
 
     return {
         "campuses": [
@@ -10665,14 +10674,7 @@ def _get_application_form_options(study_mode: str) -> dict:
             for campus in campuses.order_by("name")
         ],
         "programmes": programmes,
-        "educationLevels": [
-            "KCPE",
-            "KCSE",
-            "Artisan Certificate",
-            "Certificate",
-            "Diploma",
-            "Other",
-        ],
+        "educationLevels": education_levels,
         "intakes": [
             "September 2026",
             "January 2027",
@@ -10740,6 +10742,43 @@ def _redirect_after_application(request, study_mode: str):
     return redirect("core:airads.application_apply")
 
 
+def _validate_main_application_qualification(data: dict):
+    from apps.core.admission_course_options import (
+        EDUCATION_LEVEL_PRIMARY,
+        EDUCATION_LEVEL_SECONDARY,
+        KCSE_GRADES,
+        MAIN_SITE_EDUCATION_LEVELS,
+        get_course_option,
+        is_course_eligible,
+    )
+
+    education_level = _clean_admission_value(data, "educationLevel")
+    if education_level not in MAIN_SITE_EDUCATION_LEVELS:
+        return None, education_level, "", "Please select Primary or Secondary."
+
+    education_result = ""
+    if education_level == EDUCATION_LEVEL_SECONDARY:
+        education_result = _clean_admission_value(data, "educationResult").upper()
+        if not education_result:
+            return None, education_level, "", "Please provide the KCSE mean grade."
+        if education_result not in KCSE_GRADES:
+            return None, education_level, "", "Please select a valid KCSE mean grade."
+    elif education_level == EDUCATION_LEVEL_PRIMARY:
+        education_result = ""
+
+    course = get_course_option(_clean_admission_value(data, "preferredCourseCode"))
+    if course is None:
+        return None, education_level, education_result, "Please select an available course."
+    if not is_course_eligible(course, education_level, education_result):
+        return (
+            None,
+            education_level,
+            education_result,
+            "That course is not available for the selected education level and grade.",
+        )
+    return course, education_level, education_result, ""
+
+
 def airads_application_submit(request):
     if request.method != "POST":
         return redirect("core:airads.application_apply")
@@ -10760,7 +10799,7 @@ def airads_application_submit(request):
     }
     if not is_virtual:
         required_fields["preferredCampus"] = "Preferred campus"
-    if not (
+    if is_virtual and not (
         _clean_admission_value(data, "programId")
         or _clean_admission_value(data, "preferredProgramme")
     ):
@@ -10796,7 +10835,7 @@ def airads_application_submit(request):
 
     program = None
     program_id = _clean_admission_value(data, "programId")
-    if program_id and program_id.isdigit():
+    if is_virtual and program_id and program_id.isdigit():
         program = Program.objects.filter(id=program_id, is_published=True).first()
         if program is None and "Preferred course" not in missing_fields:
             missing_fields.append("Preferred course")
@@ -10808,23 +10847,32 @@ def airads_application_submit(request):
         )
         return _redirect_after_application(request, study_mode)
 
-    preferred_programme = (
-        program.name if program else _clean_admission_value(data, "preferredProgramme")
-    )
+    if is_virtual:
+        preferred_programme = (
+            program.name if program else _clean_admission_value(data, "preferredProgramme")
+        )
+        education_level = _clean_admission_value(data, "educationLevel")
+        education_result = ""
+        if education_level == AdmissionApplication.EDUCATION_LEVEL_KCSE:
+            education_result = _clean_admission_value(data, "educationResult").upper()
+            if not education_result:
+                messages.error(request, "Please provide the KCSE mean grade.")
+                return _redirect_after_application(request, study_mode)
+            if education_result not in AdmissionApplication.KCSE_GRADES:
+                messages.error(request, "Please select a valid KCSE mean grade.")
+                return _redirect_after_application(request, study_mode)
+    else:
+        course, education_level, education_result, qualification_error = (
+            _validate_main_application_qualification(data)
+        )
+        if qualification_error:
+            messages.error(request, qualification_error)
+            return _redirect_after_application(request, study_mode)
+        preferred_programme = course.name
+
     preferred_campus = campus.name if campus else _clean_admission_value(data, "preferredCampus")
     phone = _clean_admission_value(data, "phone")
     whatsapp = _clean_admission_value(data, "whatsapp") or phone
-    education_level = _clean_admission_value(data, "educationLevel")
-    education_result = ""
-
-    if education_level == AdmissionApplication.EDUCATION_LEVEL_KCSE:
-        education_result = _clean_admission_value(data, "educationResult").upper()
-        if not education_result:
-            messages.error(request, "Please provide the KCSE mean grade.")
-            return _redirect_after_application(request, study_mode)
-        if education_result not in AdmissionApplication.KCSE_GRADES:
-            messages.error(request, "Please select a valid KCSE mean grade.")
-            return _redirect_after_application(request, study_mode)
 
     AdmissionApplication.objects.create(
         full_name=_clean_admission_value(data, "fullName"),

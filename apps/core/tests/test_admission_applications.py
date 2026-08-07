@@ -8,7 +8,14 @@ from django.core import mail
 from django.test import override_settings
 from django.urls import reverse
 
-from apps.core.admission_course_options import MAIN_SITE_APPLICATION_COURSE_NAMES
+from apps.core.admission_course_options import (
+    EDUCATION_LEVEL_PRIMARY,
+    EDUCATION_LEVEL_SECONDARY,
+    MAIN_SITE_APPLICATION_COURSES,
+    MAIN_SITE_APPLICATION_COURSE_NAMES,
+    get_course_option,
+    is_course_eligible,
+)
 from apps.core.tests.factories import UserFactory
 
 
@@ -26,7 +33,7 @@ def open_enrollment_mode():
 
 
 @pytest.mark.django_db
-def test_main_application_form_uses_flat_curated_course_list(client):
+def test_main_application_form_uses_structured_brochure_course_list(client):
     from apps.progression.tests.factories import ProgramFactory
 
     ProgramFactory(name="Database-only Virtual Course", is_published=True)
@@ -41,10 +48,29 @@ def test_main_application_form_uses_flat_curated_course_list(client):
     assert [programme["name"] for programme in programmes] == list(
         MAIN_SITE_APPLICATION_COURSE_NAMES
     )
-    assert all(set(programme) == {"name"} for programme in programmes)
+    assert len(programmes) == len(MAIN_SITE_APPLICATION_COURSES)
+    assert all(
+        set(programme)
+        == {
+            "code",
+            "name",
+            "route",
+            "minimumGrade",
+            "eligibleEducationLevels",
+            "requirementText",
+            "additionalRequirement",
+        }
+        for programme in programmes
+    )
+    assert response.json()["props"]["educationLevels"] == ["Primary", "Secondary"]
     assert "Database-only Virtual Course" not in {
         programme["name"] for programme in programmes
     }
+    cpa_foundation = next(
+        programme for programme in programmes if programme["code"] == "kasneb-cpa-foundation"
+    )
+    assert cpa_foundation["minimumGrade"] == "C+"
+    assert "Mathematics and English" in cpa_foundation["additionalRequirement"]
 
 
 @pytest.mark.django_db
@@ -83,9 +109,9 @@ def test_public_admission_application_submission_creates_pending_application(cli
         "phone": " 0715 000 111 ",
         "email": " jane@example.com ",
         "preferredCampus": "Eldoret Campus",
-        "preferredProgramme": "Information Communication Technology",
+        "preferredCourseCode": "diploma-information-communication-technology",
         "intake": "January 2026",
-        "educationLevel": "KCSE",
+        "educationLevel": "Secondary",
         "educationResult": "B-",
         "message": "I would like to join the diploma intake.",
     }
@@ -105,9 +131,9 @@ def test_public_admission_application_submission_creates_pending_application(cli
     assert application.whatsapp == "0715 000 111"
     assert application.email == "jane@example.com"
     assert application.preferred_campus == "Eldoret Campus"
-    assert application.preferred_programme == "Information Communication Technology"
+    assert application.preferred_programme == "Diploma in Information and Communication Technology (ICT)"
     assert application.intake == "January 2026"
-    assert application.education_level == "KCSE"
+    assert application.education_level == "Secondary"
     assert application.education_result == "B-"
     assert application.message == "I would like to join the diploma intake."
     assert application.status == AdmissionApplication.STATUS_NEW
@@ -123,8 +149,8 @@ def test_public_admission_application_requires_result_for_selected_exam(client):
             "fullName": "Jane Achieng",
             "phone": "0715000111",
             "preferredCampus": "Eldoret Campus",
-            "preferredProgramme": "Information Communication Technology",
-            "educationLevel": "KCSE",
+            "preferredCourseCode": "certificate-information-communication-technology",
+            "educationLevel": "Secondary",
         },
     )
 
@@ -136,7 +162,7 @@ def test_public_admission_application_requires_result_for_selected_exam(client):
 
 
 @pytest.mark.django_db
-def test_public_admission_application_does_not_capture_kcpe_marks(client):
+def test_primary_application_ignores_result_and_uses_artisan_route(client):
     from apps.core.models import AdmissionApplication
 
     client.post(
@@ -145,15 +171,108 @@ def test_public_admission_application_does_not_capture_kcpe_marks(client):
             "fullName": "John Kiptoo",
             "phone": "0715000222",
             "preferredCampus": "Eldoret Campus",
-            "preferredProgramme": "Information Communication Technology",
-            "educationLevel": "KCPE",
+            "preferredCourseCode": "artisan-welding-fabrication",
+            "educationLevel": "Primary",
             "educationResult": "347",
         },
     )
 
     application = AdmissionApplication.objects.get()
-    assert application.education_level == "KCPE"
+    assert application.education_level == "Primary"
     assert application.education_result == ""
+    assert application.preferred_programme == "Artisan in Welding and Fabrication"
+
+
+@pytest.mark.django_db
+def test_secondary_application_rejects_course_above_selected_grade(client):
+    from apps.core.models import AdmissionApplication
+
+    response = client.post(
+        reverse("core:airads.application_submit"),
+        data={
+            "fullName": "David Mwangi",
+            "phone": "0715000333",
+            "preferredCampus": "Eldoret Campus",
+            "preferredCourseCode": "diploma-information-communication-technology",
+            "educationLevel": "Secondary",
+            "educationResult": "D",
+        },
+    )
+
+    assert not AdmissionApplication.objects.exists()
+    assert any(
+        "not available for the selected education level and grade" in str(message)
+        for message in get_messages(response.wsgi_request)
+    )
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("course_code", "grade", "expected_message"),
+    [
+        ("unknown-course", "D", "Please select an available course."),
+        (
+            "certificate-information-communication-technology",
+            "Z",
+            "Please select a valid KCSE mean grade.",
+        ),
+    ],
+)
+def test_secondary_application_rejects_unknown_courses_and_invalid_grades(
+    client,
+    course_code,
+    grade,
+    expected_message,
+):
+    from apps.core.models import AdmissionApplication
+
+    response = client.post(
+        reverse("core:airads.application_submit"),
+        data={
+            "fullName": "Invalid Applicant",
+            "phone": "0715000444",
+            "preferredCampus": "Eldoret Campus",
+            "preferredCourseCode": course_code,
+            "educationLevel": "Secondary",
+            "educationResult": grade,
+        },
+    )
+
+    assert not AdmissionApplication.objects.exists()
+    assert expected_message in {
+        str(message) for message in get_messages(response.wsgi_request)
+    }
+
+
+@pytest.mark.parametrize(
+    ("grade", "course_code", "eligible"),
+    [
+        ("D", "certificate-information-communication-technology", True),
+        ("D", "diploma-information-communication-technology", False),
+        ("C-", "diploma-information-communication-technology", True),
+        ("C-", "diploma-health-records-information-technology", False),
+        ("C", "diploma-health-records-information-technology", True),
+        ("D", "driving-school", True),
+    ],
+)
+def test_secondary_course_eligibility_is_cumulative(grade, course_code, eligible):
+    course = get_course_option(course_code)
+
+    assert is_course_eligible(course, EDUCATION_LEVEL_SECONDARY, grade) is eligible
+
+
+def test_primary_course_eligibility_is_limited_to_artisan_and_open_entry_routes():
+    assert is_course_eligible(
+        get_course_option("artisan-plumbing"), EDUCATION_LEVEL_PRIMARY
+    )
+    assert is_course_eligible(get_course_option("computer-computer-packages"), EDUCATION_LEVEL_PRIMARY)
+    assert not is_course_eligible(
+        get_course_option("certificate-business-management"), EDUCATION_LEVEL_PRIMARY
+    )
+    assert not is_course_eligible(
+        get_course_option("certificate-diploma-general-agriculture"),
+        EDUCATION_LEVEL_PRIMARY,
+    )
 
 
 @pytest.mark.django_db
@@ -203,12 +322,13 @@ def test_application_submission_uses_course_label_for_missing_course(client):
             "fullName": "Normal Student",
             "phone": "0715000111",
             "preferredCampus": "Eldoret Campus",
+            "educationLevel": "Primary",
         },
     )
 
     assert response.status_code == 302
     messages = [str(message) for message in get_messages(response.wsgi_request)]
-    assert any("Preferred course" in message for message in messages)
+    assert any("available course" in message for message in messages)
 
 
 @pytest.mark.django_db
@@ -218,7 +338,8 @@ def test_normal_submission_requires_physical_campus(client):
         data={
             "fullName": "Normal Student",
             "phone": "0715000111",
-            "preferredProgramme": "Information Communication Technology",
+            "preferredCourseCode": "artisan-welding-fabrication",
+            "educationLevel": "Primary",
             "preferredCampus": "",
         },
     )

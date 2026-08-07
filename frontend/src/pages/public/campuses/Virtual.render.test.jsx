@@ -69,13 +69,62 @@ const virtualCoursesProps = {
 const mainApplyProps = {
   campuses: [{ id: 2, name: "Eldoret Campus", slug: "eldoret", type: "physical" }],
   programmes: [
-    { name: "Electrical Engineering" },
-    { name: "KASNEB CPA" },
-    { name: "NITA Welding Technology" },
-    { name: "Driving School" },
-    { name: "Computer Packages" },
+    {
+      code: "artisan-plumbing",
+      name: "Artisan in Plumbing",
+      route: "Artisan",
+      minimumGrade: "E",
+      eligibleEducationLevels: ["Primary", "Secondary"],
+      requirementText: "KCPE or KCSE D- and below",
+      additionalRequirement: "",
+    },
+    {
+      code: "certificate-information-communication-technology",
+      name: "Certificate in Information and Communication Technology (ICT)",
+      route: "Certificate",
+      minimumGrade: "D",
+      eligibleEducationLevels: ["Secondary"],
+      requirementText: "KCSE D or higher",
+      additionalRequirement: "",
+    },
+    {
+      code: "diploma-information-communication-technology",
+      name: "Diploma in Information and Communication Technology (ICT)",
+      route: "Diploma",
+      minimumGrade: "C-",
+      eligibleEducationLevels: ["Secondary"],
+      requirementText: "KCSE C- or higher",
+      additionalRequirement: "",
+    },
+    {
+      code: "diploma-health-records-information-technology",
+      name: "Diploma in Health Records and Information Technology",
+      route: "Diploma",
+      minimumGrade: "C",
+      eligibleEducationLevels: ["Secondary"],
+      requirementText: "KCSE C or higher",
+      additionalRequirement: "",
+    },
+    {
+      code: "kasneb-cpa-foundation",
+      name: "CPA Foundation",
+      route: "KASNEB",
+      minimumGrade: "C+",
+      eligibleEducationLevels: ["Secondary"],
+      requirementText: "KCSE C+ or higher",
+      additionalRequirement: "C+ in Mathematics and English is also required.",
+    },
+    {
+      code: "driving-school",
+      name: "Driving School",
+      route: "Driving School",
+      minimumGrade: null,
+      eligibleEducationLevels: ["Primary", "Secondary"],
+      requirementText: "Open entry",
+      additionalRequirement: "",
+    },
   ],
-  educationLevels: ["KCPE", "KCSE"],
+  educationLevels: ["Primary", "Secondary"],
   intakes: ["Next Available Intake"],
   applicationContext: {
     studyMode: "on_campus",
@@ -143,23 +192,81 @@ describe("Public virtual campus pages", () => {
     consoleError.mockRestore();
   });
 
-  test("shows the matching KCSE grade field after KCSE is selected", () => {
+  test("requires a grade for secondary applicants before enabling courses", () => {
     renderInertiaPage(ApplicationApply, mainApplyProps, "Public/ApplicationApply");
 
-    fireEvent.mouseDown(screen.getByLabelText("Education level"));
-    fireEvent.click(screen.getByRole("option", { name: "KCSE" }));
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /Education level/i }));
+    fireEvent.click(screen.getByRole("option", { name: "Secondary" }));
 
     expect(screen.getByRole("combobox", { name: /KCSE mean grade/i })).toBeRequired();
-    expect(screen.queryByLabelText("KCPE total marks")).toBeNull();
+    expect(screen.getByRole("combobox", { name: /Preferred course/i })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
   });
 
-  test("does not ask for marks when KCPE is selected", () => {
+  test("primary applicants see artisan and open-entry courses without a grade", () => {
     renderInertiaPage(ApplicationApply, mainApplyProps, "Public/ApplicationApply");
 
-    fireEvent.mouseDown(screen.getByLabelText("Education level"));
-    fireEvent.click(screen.getByRole("option", { name: "KCPE" }));
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /Education level/i }));
+    fireEvent.click(screen.getByRole("option", { name: "Primary" }));
 
-    expect(screen.queryByLabelText("KCPE total marks")).toBeNull();
     expect(screen.queryByRole("combobox", { name: /KCSE mean grade/i })).toBeNull();
+    const courseSelect = screen.getByRole("combobox", { name: /Preferred course/i });
+    expect(courseSelect).toBeEnabled();
+
+    fireEvent.mouseDown(courseSelect);
+    expect(screen.getByRole("option", { name: /Artisan in Plumbing/i })).toBeTruthy();
+    expect(screen.getByRole("option", { name: /Driving School/i })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: /Diploma in Information and Communication/i })).toBeNull();
+    expect(screen.queryByRole("option", { name: /Not Sure Yet/i })).toBeNull();
+  });
+
+  test("secondary course recommendations use cumulative KCSE eligibility", () => {
+    renderInertiaPage(ApplicationApply, mainApplyProps, "Public/ApplicationApply");
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /Education level/i }));
+    fireEvent.click(screen.getByRole("option", { name: "Secondary" }));
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /KCSE mean grade/i }));
+    fireEvent.click(screen.getByRole("option", { name: "C-" }));
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /Preferred course/i }));
+
+    expect(screen.getByRole("option", { name: /Certificate in Information and Communication/i })).toBeTruthy();
+    expect(screen.getByRole("option", { name: /Diploma in Information and Communication/i })).toBeTruthy();
+    expect(screen.getByRole("option", { name: /Artisan in Plumbing/i })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: /Diploma in Health Records/i })).toBeNull();
+  });
+
+  test("changing to a lower grade clears an ineligible course selection", () => {
+    renderInertiaPage(ApplicationApply, mainApplyProps, "Public/ApplicationApply");
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /Education level/i }));
+    fireEvent.click(screen.getByRole("option", { name: "Secondary" }));
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /KCSE mean grade/i }));
+    fireEvent.click(screen.getByRole("option", { name: "C-" }));
+    const courseSelect = screen.getByRole("combobox", { name: /Preferred course/i });
+    fireEvent.mouseDown(courseSelect);
+    fireEvent.click(screen.getByRole("option", { name: /Diploma in Information and Communication/i }));
+    expect(courseSelect).toHaveTextContent("Diploma in Information and Communication Technology");
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /KCSE mean grade/i }));
+    fireEvent.click(screen.getByRole("option", { name: "D" }));
+
+    expect(courseSelect).not.toHaveTextContent("Diploma in Information and Communication Technology");
+  });
+
+  test("displays additional brochure requirements for a selected course", () => {
+    renderInertiaPage(ApplicationApply, mainApplyProps, "Public/ApplicationApply");
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /Education level/i }));
+    fireEvent.click(screen.getByRole("option", { name: "Secondary" }));
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /KCSE mean grade/i }));
+    fireEvent.click(screen.getByRole("option", { name: "C+" }));
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /Preferred course/i }));
+    fireEvent.click(screen.getByRole("option", { name: /CPA Foundation/i }));
+
+    expect(
+      screen.getAllByText("C+ in Mathematics and English is also required.").length,
+    ).toBeGreaterThan(0);
   });
 });
