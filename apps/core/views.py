@@ -1107,6 +1107,8 @@ def public_program_detail(
             "prerequisites": prerequisite_status,
         }
 
+    from apps.progression.enrollment_intents import EnrollmentIntentService
+
     return render(
         request,
         "Public/ProgramDetail",
@@ -1125,6 +1127,10 @@ def public_program_detail(
             "siteContext": _build_site_context(request),
             "socialAuth": _get_social_auth_context(request),
             "programInterestSuccess": _pop_program_interest_success(request, program),
+            "enrollmentAccess": EnrollmentIntentService.pop_access_payload(
+                request,
+                program,
+            ),
         },
     )
 

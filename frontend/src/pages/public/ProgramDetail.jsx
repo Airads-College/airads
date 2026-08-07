@@ -405,7 +405,7 @@ function CourseDetailsSidebar({
                                 bgcolor: theme.palette.primary.main,
                             }}
                         >
-                            CONTINUE
+                            CONTINUE STUDYING
                         </Button>
 
                         {/* Quick Actions for enrolled */}
@@ -1140,7 +1140,6 @@ export default function ProgramDetail({
                 program={program}
                 enrollmentData={enrollmentData}
             />
-
             {/* Cart Snackbar */}
             <Snackbar
                 open={cartSnackbar.open}
