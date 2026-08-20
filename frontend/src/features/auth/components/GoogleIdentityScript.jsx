@@ -43,6 +43,7 @@ export function GoogleSignInButton({
     nextUrl = "",
     context = "signin",
     text = "continue_with",
+    autoPrompt = false,
     maxWidth = DEFAULT_BUTTON_WIDTH,
 }) {
     const wrapperRef = useRef(null);
@@ -94,6 +95,8 @@ export function GoogleSignInButton({
                     context,
                     ux_mode: "redirect",
                     login_uri: loginUri,
+                    use_fedcm_for_prompt: true,
+                    use_fedcm_for_button: true,
                 });
                 google.accounts.id.renderButton(buttonElement, {
                     type: "standard",
@@ -105,6 +108,9 @@ export function GoogleSignInButton({
                     state: nextUrl || undefined,
                     width: buttonWidth,
                 });
+                if (autoPrompt) {
+                    google.accounts.id.prompt();
+                }
             })
             .catch(() => {});
 
@@ -112,7 +118,7 @@ export function GoogleSignInButton({
             cancelled = true;
             buttonElement.innerHTML = "";
         };
-    }, [buttonWidth, clientId, context, loginUri, nextUrl, text]);
+    }, [autoPrompt, buttonWidth, clientId, context, loginUri, nextUrl, text]);
 
     return (
         <div

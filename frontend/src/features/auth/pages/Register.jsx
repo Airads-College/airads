@@ -162,6 +162,7 @@ export default function Register({
                                             nextUrl={nextUrl}
                                             context="signup"
                                             text="signup_with"
+                                            autoPrompt={!nextUrl}
                                         />
                                     </Box>
                                     <Divider sx={{ mb: 2 }}>
